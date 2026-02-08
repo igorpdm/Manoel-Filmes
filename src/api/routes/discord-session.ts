@@ -13,7 +13,7 @@ import { optionalString, requireNonEmptyString, requireNumberInRange, requireObj
 
 interface DiscordSessionDeps {
   roomManager: typeof RoomManager.prototype;
-  getSessionStatusData: (roomId: string) => unknown | null;
+  getSessionStatusData: (roomId: string) => Record<string, unknown> | null;
   uploadsDir: string;
 }
 

@@ -1,31 +1,12 @@
 import type { WSMessage, ExtendedWebSocket } from "../shared/types";
 import { roomManager } from "../core/room-manager";
 import { logger } from "../shared/logger";
+import { buildSessionStatusData } from "./services/session-status";
 
 function isCommandSeqValid(roomId: string, seq?: number) {
     if (typeof seq !== "number") return true;
     const lastSeq = roomManager.getLastCommandSeq(roomId);
     return seq > lastSeq;
-}
-
-// Helper re-defined locally as in server.ts
-function getSessionStatusData(roomId: string) {
-    const room = roomManager.getRoom(roomId);
-    if (!room) return null;
-
-    const connectedUsers = roomManager.getConnectedUsers(roomId);
-    const { ratings, average } = roomManager.getRatings(roomId);
-
-    return {
-        status: room.status,
-        viewerCount: connectedUsers.length,
-        viewers: connectedUsers.map(u => ({ discordId: u.discordId, username: u.username })),
-        ratings,
-        average,
-        allRated: roomManager.allUsersRated(roomId),
-        movieInfo: room.movieInfo || null,
-        movieName: room.movieName || "Filme"
-    };
 }
 
 export function handleWebSocketMessage(ws: ExtendedWebSocket, message: any) {
@@ -58,7 +39,7 @@ export function handleWebSocketMessage(ws: ExtendedWebSocket, message: any) {
 
     switch (data.type) {
         case "session-status":
-            const statusData = getSessionStatusData(roomId);
+            const statusData = buildSessionStatusData(roomManager, roomId);
             if (statusData) {
                 ws.send(JSON.stringify({ type: "session-status", ...statusData }));
             }
@@ -96,7 +77,7 @@ export function handleWebSocketMessage(ws: ExtendedWebSocket, message: any) {
             if (isFirstPlay && playRoom?.discordSession) {
                 roomManager.setSessionStatus(roomId, 'playing');
 
-                const statusData = getSessionStatusData(roomId);
+                const statusData = buildSessionStatusData(roomManager, roomId);
                 if (statusData) {
                     roomManager.broadcastAll(roomId, { type: "session-status", ...statusData });
                 }

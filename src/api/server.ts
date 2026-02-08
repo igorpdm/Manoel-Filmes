@@ -13,6 +13,7 @@ import { logger } from "../shared/logger";
 import { createTmdbRouter } from "./routes/tmdb";
 import { createDiscordSessionRouter } from "./routes/discord-session";
 import { createUploadRouter, startUploadCleanup, cleanupRoomUploads } from "./routes/upload";
+import { buildSessionStatusData } from "./services/session-status";
 import { fileURLToPath } from "url";
 import { dirname } from "path";
 import { 
@@ -117,25 +118,7 @@ app.use(cors({
 }));
 app.use(express.json());
 
-// Helper for Session Status
-function getSessionStatusData(roomId: string) {
-    const room = roomManager.getRoom(roomId);
-    if (!room) return null;
-
-    const connectedUsers = roomManager.getConnectedUsers(roomId);
-    const { ratings, average } = roomManager.getRatings(roomId);
-
-    return {
-        status: room.status,
-        viewerCount: connectedUsers.length,
-        viewers: connectedUsers.map(u => ({ discordId: u.discordId, username: u.username })),
-        ratings,
-        average,
-        allRated: roomManager.allUsersRated(roomId),
-        movieInfo: room.movieInfo || null,
-        movieName: room.movieName || "Filme"
-    };
-}
+const getSessionStatusData = (roomId: string) => buildSessionStatusData(roomManager, roomId);
 
 // Routes
 const tmdbDeps = { apiKey: TMDB_API_KEY || "", baseUrl: TMDB_BASE_URL, imageBase: TMDB_IMAGE_BASE };
