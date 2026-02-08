@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sessão | Manoel Filmes</title>
+    <link rel="stylesheet" href="/styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;700&display=swap" rel="stylesheet">
+</head>
+
+<body>
+    <div class="background-animation"></div>
+    <div class="container">
+        <h1 id="room-title" class="room-page-title">Carregando Sessão...</h1>
+
+        <header class="room-header">
+            <div class="room-movie-info" id="movie-info-header" title="Clique para ver detalhes">
+                <img id="header-movie-poster" src="/logo.jpg" alt="Poster" class="room-movie-poster hidden">
+                <div class="room-movie-meta">
+                    <h2 id="movie-name-display" class="movie-title-large">...</h2>
+                    <div class="header-badges">
+                        <span id="header-episode-badge" class="episode-badge hidden"></span>
+                        <span id="header-movie-rating" class="room-movie-rating hidden">
+                            <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
+                                <polygon
+                                    points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                            </svg>
+                            <span id="header-rating-value">0.0</span>
+                        </span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="room-actions">
+                <button id="btn-toggle-users" class="viewer-badge-btn" title="Lista de Usuários">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" />
+                        <circle cx="9" cy="7" r="4" />
+                        <path d="M23 21v-2a4 4 0 00-3-3.87" />
+                        <path d="M16 3.13a4 4 0 010 7.75" />
+                    </svg>
+                    <span id="viewer-count">0</span>
+                </button>
+
+                <div class="viewer-badge" id="network-speed-badge" title="Velocidade de download"
+                    style="display: none; white-space: nowrap;">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 2v10M12 12l4-4M12 12l-4-4" />
+                        <path d="M4 14h16v6H4z" />
+                    </svg>
+                    <span id="network-speed">--</span>
+                </div>
+
+
+                <button id="btn-end-session" class="btn-danger hidden" title="Encerrar Sessão">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M18.36 6.64a9 9 0 11-12.73 0" />
+                        <line x1="12" y1="2" x2="12" y2="12" />
+                    </svg>
+                    Encerrar
+                </button>
+            </div>
+        </header>
+
+        <main class="player-wrapper">
+            <div id="player-container">
+                <video id="video" playsinline></video>
+                <div id="subtitle-display" class="subtitle-display"></div>
+
+                <div id="upload-zone" class="hidden">
+                    <svg class="upload-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12" />
+                    </svg>
+                    <div class="upload-text">Arraste o filme aqui</div>
+                    <div class="upload-subtext">ou clique para selecionar</div>
+                    <button id="btn-select-file" class="btn-primary" style="max-width: 200px;">Selecionar Vídeo</button>
+                    <input type="file" id="file-input" accept="video/*,.mkv" hidden>
+
+                    <div class="subtitle-upload-section">
+                        <div class="subtitle-upload-header">
+                            <span>Legendas (opcional)</span>
+                            <button id="btn-add-subtitles" class="btn-add-subtitle" type="button">
+                                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+                                    stroke-width="2">
+                                    <path d="M12 5v14M5 12h14" />
+                                </svg>
+                                Adicionar
+                            </button>
+                        </div>
+                        <input type="file" id="subtitle-input" accept=".srt" multiple hidden>
+                        <div id="subtitles-pending-list" class="subtitles-pending-list"></div>
+                    </div>
+                </div>
+
+                <div id="waiting-overlay" class="overlay-screen hidden">
+                    <div class="spinner"></div>
+                    <h2>Aguardando o Host</h2>
+                    <p>O dono da sala está selecionando o filme...</p>
+                </div>
+
+                <div id="upload-overlay" class="overlay-screen hidden">
+                    <h2>Enviando Filme...</h2>
+                    <div class="progress-container" style="width: 60%; margin: 20px 0;">
+                        <div id="upload-progress-bg"
+                            style="width: 100%; height: 8px; background: rgba(255,255,255,0.1); border-radius: 4px;">
+                            <div id="upload-progress-fill"
+                                style="width: 0%; height: 100%; background: var(--primary-color); border-radius: 4px; transition: width 0.2s;">
+                            </div>
+                        </div>
+                        <div style="text-align: right; margin-top: 5px; font-size: 0.9em; color: var(--primary-color);">
+                            <span id="upload-progress-text">0%</span>
+                        </div>
+                    </div>
+                    <p id="upload-status">Preparando...</p>
+                    <div class="upload-stats">
+                        <span id="upload-size"></span> • <span id="upload-speed"></span> • ETA: <span
+                            id="upload-eta"></span>
+                    </div>
+                </div>
+
+                <div id="player-overlay" class="overlay-screen hidden" style="background: rgba(0,0,0,0.5);">
+                    <div id="sync-indicator" class="sync-indicator">
+                        <div class="spinner small"></div>
+                        <span class="sync-text">Sincronizando...</span>
+                    </div>
+                    <button id="center-play" class="control-btn"
+                        style="transform: scale(2); background: rgba(0,0,0,0.5); border-radius: 50%; padding: 15px; margin-top: 20px;">
+                        <svg viewBox="0 0 24 24" width="24" height="24">
+                            <polygon points="5 3 19 12 5 21 5 3" fill="white"></polygon>
+                        </svg>
+                    </button>
+                </div>
+
+                <div id="player-controls">
+                    <div id="progress-wrapper">
+                        <div id="progress-buffered"></div>
+                        <div id="progress-filled"></div>
+                        <div id="progress-thumb"></div>
+                    </div>
+
+                    <div class="controls-row">
+                        <button id="btn-play" class="control-btn">
+                            <svg class="icon-play" viewBox="0 0 24 24">
+                                <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                            </svg>
+                            <svg class="icon-pause hidden" viewBox="0 0 24 24">
+                                <rect x="6" y="4" width="4" height="16"></rect>
+                                <rect x="14" y="4" width="4" height="16"></rect>
+                            </svg>
+                        </button>
+
+                        <button id="btn-backward" class="control-btn">
+                            <svg viewBox="0 0 24 24">
+                                <path d="M11 17l-5-5 5-5M18 17l-5-5 5-5"></path>
+                            </svg>
+                        </button>
+
+                        <button id="btn-forward" class="control-btn">
+                            <svg viewBox="0 0 24 24">
+                                <path d="M13 17l5-5-5-5M6 17l5-5-5-5"></path>
+                            </svg>
+                        </button>
+
+                        <div class="volume-container" style="display: flex; align-items: center; gap: 5px;">
+                            <button id="btn-volume" class="control-btn">
+                                <svg class="icon-volume" viewBox="0 0 24 24">
+                                    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+                                    <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+                                </svg>
+                                <svg class="icon-muted hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2">
+                                    <path d="M11 5L6 9H2v6h4l5 4V5zM23 9l-6 6M17 9l6 6" />
+                                </svg>
+                            </button>
+                            <input type="range" id="volume-slider" min="0" max="1" step="0.05" value="1"
+                                style="width: 80px; accent-color: var(--primary-color);">
+                        </div>
+
+                        <div class="time-display" style="font-family: monospace; font-size: 0.9rem;">
+                            <span id="time-current">0:00</span> / <span id="time-duration">0:00</span>
+                        </div>
+
+                        <div class="controls-spacer"></div>
+
+                        <button id="btn-settings" class="control-btn" title="Configurações de Legenda">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path
+                                    d="M12.22 2h-.44a2 2 0 00-2 2v.18a2 2 0 01-1 1.73l-.43.25a2 2 0 01-2 0l-.15-.08a2 2 0 00-2.73.73l-.22.38a2 2 0 00.73 2.73l.15.1a2 2 0 011 1.72v.51a2 2 0 01-1 1.74l-.15.09a2 2 0 00-.73 2.73l.22.38a2 2 0 002.73.73l.15-.08a2 2 0 012 0l.43.25a2 2 0 011 1.73V20a2 2 0 002 2h.44a2 2 0 002-2v-.18a2 2 0 011-1.73l.43-.25a2 2 0 012 0l.15.08a2 2 0 002.73-.73l.22-.39a2 2 0 00-.73-2.73l-.15-.08a2 2 0 01-1-1.74v-.5a2 2 0 011-1.74l.15-.09a2 2 0 00.73-2.73l-.22-.38a2 2 0 00-2.73-.73l-.15.08a2 2 0 01-2 0l-.43-.25a2 2 0 01-1-1.73V4a2 2 0 00-2-2z" />
+                                <circle cx="12" cy="12" r="3" />
+                            </svg>
+                        </button>
+
+                        <button id="btn-pip" class="control-btn" title="Picture in Picture">
+                            <svg viewBox="0 0 24 24">
+                                <rect x="2" y="5" width="20" height="14" rx="2" ry="2" fill="none" stroke="currentColor"
+                                    stroke-width="2"></rect>
+                                <rect x="12" y="11" width="8" height="6" fill="currentColor"></rect>
+                            </svg>
+                        </button>
+
+                        <button id="btn-fullscreen" class="control-btn">
+                            <svg class="icon-expand" viewBox="0 0 24 24">
+                                <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"></path>
+                            </svg>
+                            <svg class="icon-compress hidden" viewBox="0 0 24 24">
+                                <path
+                                    d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3">
+                                </path>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Settings Panel -->
+                <div id="settings-panel" class="settings-panel">
+                    <div class="settings-header">
+                        <h3>Configurações de Legenda</h3>
+                        <button id="btn-close-settings" class="btn-icon">
+                            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <line x1="18" y1="6" x2="6" y2="18"></line>
+                                <line x1="6" y1="6" x2="18" y2="18"></line>
+                            </svg>
+                        </button>
+                    </div>
+
+                    <div class="settings-body">
+                        <div class="setting-group">
+                            <label>Legenda</label>
+                            <select id="subtitle-select" class="custom-select">
+                                <option value="">Desativada</option>
+                            </select>
+                        </div>
+
+                        <div id="subtitle-upload-zone" class="subtitle-upload-zone hidden">
+                            <input type="file" id="subtitle-session-input" accept=".srt" hidden>
+                            <div class="subtitle-dropzone" id="subtitle-dropzone">
+                                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.5">
+                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                    <polyline points="17 8 12 3 7 8"></polyline>
+                                    <line x1="12" y1="3" x2="12" y2="15"></line>
+                                </svg>
+                                <span class="subtitle-dropzone-text">Enviar legenda .srt</span>
+                            </div>
+                            <div id="subtitle-upload-status" class="subtitle-upload-status hidden"></div>
+                        </div>
+
+                        <div class="setting-group">
+                            <label>Fonte</label>
+                            <select id="font-family-select" class="custom-select">
+                                <option value="'Outfit', sans-serif" selected>Outfit</option>
+                                <option value="sans-serif">Sans-serif</option>
+                                <option value="serif">Serif</option>
+                                <option value="monospace">Monospace</option>
+                            </select>
+                        </div>
+
+                        <div class="setting-group">
+                            <label>Tamanho <span id="font-size-value">28px</span></label>
+                            <input type="range" id="font-size-slider" class="settings-slider" min="16" max="56"
+                                value="28">
+                        </div>
+
+                        <div class="setting-group">
+                            <label>Cor do Texto</label>
+                            <div class="color-picker-wrapper">
+                                <input type="color" id="text-color-picker" value="#ffffff">
+                                <span class="color-preview" id="text-color-preview"></span>
+                            </div>
+                        </div>
+
+                        <div class="setting-group">
+                            <label class="toggle-label">
+                                <span>Fundo</span>
+                                <input type="checkbox" id="bg-enabled-toggle" class="toggle-input" checked>
+                                <span class="toggle-switch"></span>
+                            </label>
+                        </div>
+
+                        <div class="setting-group">
+                            <label>Cor do Fundo</label>
+                            <div class="color-picker-wrapper">
+                                <input type="color" id="bg-color-picker" value="#000000">
+                                <span class="color-preview" id="bg-color-preview"></span>
+                            </div>
+                        </div>
+
+                        <div class="setting-group">
+                            <label>Opacidade <span id="bg-opacity-value">75%</span></label>
+                            <input type="range" id="bg-opacity-slider" class="settings-slider" min="0" max="1"
+                                step="0.05" value="0.75">
+                        </div>
+
+                        <div class="setting-group">
+                            <label>Prévia</label>
+                            <div id="subtitle-preview" class="subtitle-preview">
+                                <span>Exemplo de legenda</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Custom Modals -->
+    <div id="modal-confirm-end" class="modal-overlay hidden">
+        <div class="modal-content">
+            <h3>Encerrar Sessão?</h3>
+            <p>Isso irá desconectar todos os participantes e apagar a sala.</p>
+            <div class="modal-actions">
+                <button id="btn-cancel-end" class="btn-secondary">Cancelar</button>
+                <button id="btn-confirm-end" class="btn-danger">Encerrar</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="modal-session-ended" class="modal-overlay hidden">
+        <div class="modal-content">
+            <h3>Sessão Encerrada</h3>
+            <p>O host encerrou esta sessão de cinema.</p>
+            <button id="btn-home" class="btn-primary">Voltar ao Início</button>
+        </div>
+    </div>
+
+    <!-- Movie Details Modal -->
+    <div id="modal-movie-details" class="modal-overlay hidden">
+        <div class="modal-content movie-modal-content">
+            <div class="movie-modal-header">
+                <img id="modal-poster" src="/logo.jpg" alt="Poster" class="movie-modal-poster">
+                <div class="movie-modal-info">
+                    <h3 id="modal-title">Título do Filme</h3>
+                    <div id="movie-modal-rating-badge" class="movie-modal-rating">
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
+                            <polygon
+                                points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                        </svg>
+                        <span id="modal-rating-value">0.0</span>
+                    </div>
+                    <p id="modal-year" class="movie-modal-genres">2024</p>
+                    <p id="modal-genres" class="movie-modal-genres">Ação, Aventura</p>
+                </div>
+            </div>
+            <p id="modal-overview" class="movie-modal-overview">Sinopse do filme...</p>
+            <div id="modal-episode-section" class="modal-episode-section hidden">
+                <div class="modal-episode-divider"></div>
+                <p id="modal-episode-title" class="modal-episode-title"></p>
+            </div>
+            <button id="btn-close-movie-modal" class="btn-primary" style="margin-top: 1.5rem;">Fechar</button>
+        </div>
+    </div>
+
+    <!-- Rating Modal -->
+    <div id="modal-rating" class="modal-overlay hidden">
+        <div class="modal-content rating-modal-content">
+            <div class="rating-modal-header">
+                <img id="rating-poster" src="/logo.jpg" alt="Poster" class="rating-modal-poster">
+                <div>
+                    <h3 id="rating-movie-title">Avalie o Filme</h3>
+                    <p id="rating-episode-info" class="rating-episode-info hidden"></p>
+                </div>
+            </div>
+            <p class="rating-question">O que você achou?</p>
+            <div class="star-rating" id="star-rating-container">
+                <!-- Stars will be injected by JS or SVG directly -->
+                <!-- We need 5 stars. We can use a single container to track mouse move -->
+                <div class="stars-bg">
+                    <!-- 10 Stars for 1-10 rating -->
+                    <svg viewBox="0 0 24 24" class="star-icon">
+                        <polygon
+                            points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                    </svg>
+                    <svg viewBox="0 0 24 24" class="star-icon">
+                        <polygon
+                            points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                    </svg>
+                    <svg viewBox="0 0 24 24" class="star-icon">
+                        <polygon
+                            points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                    </svg>
+                    <svg viewBox="0 0 24 24" class="star-icon">
+                        <polygon
+                            points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                    </svg>
+                    <svg viewBox="0 0 24 24" class="star-icon">
+                        <polygon
+                            points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                    </svg>
+                    <svg viewBox="0 0 24 24" class="star-icon">
+                        <polygon
+                            points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                    </svg>
+                    <svg viewBox="0 0 24 24" class="star-icon">
+                        <polygon
+                            points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                    </svg>
+                    <svg viewBox="0 0 24 24" class="star-icon">
+                        <polygon
+                            points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                    </svg>
+                    <svg viewBox="0 0 24 24" class="star-icon">
+                        <polygon
+                            points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                    </svg>
+                    <svg viewBox="0 0 24 24" class="star-icon">
+                        <polygon
+                            points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                    </svg>
+                </div>
+                <!-- Foreground stars -->
+                <div class="stars-fg" id="stars-fg" style="width: 0%;">
+                    <div class="stars-fg-wrapper">
+                        <svg viewBox="0 0 24 24" class="star-icon">
+                            <polygon
+                                points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                        </svg>
+                        <svg viewBox="0 0 24 24" class="star-icon">
+                            <polygon
+                                points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                        </svg>
+                        <svg viewBox="0 0 24 24" class="star-icon">
+                            <polygon
+                                points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                        </svg>
+                        <svg viewBox="0 0 24 24" class="star-icon">
+                            <polygon
+                                points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                        </svg>
+                        <svg viewBox="0 0 24 24" class="star-icon">
+                            <polygon
+                                points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                        </svg>
+                        <svg viewBox="0 0 24 24" class="star-icon">
+                            <polygon
+                                points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                        </svg>
+                        <svg viewBox="0 0 24 24" class="star-icon">
+                            <polygon
+                                points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                        </svg>
+                        <svg viewBox="0 0 24 24" class="star-icon">
+                            <polygon
+                                points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                        </svg>
+                        <svg viewBox="0 0 24 24" class="star-icon">
+                            <polygon
+                                points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                        </svg>
+                        <svg viewBox="0 0 24 24" class="star-icon">
+                            <polygon
+                                points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                        </svg>
+                    </div>
+                </div>
+            </div>
+            <div id="rating-value-display"
+                style="text-align: center; font-size: 1.5rem; font-weight: bold; margin-top: 10px; color: var(--secondary-color);">
+                0.0</div>
+            <p id="rating-status" class="rating-status hidden"></p>
+            <button id="btn-submit-rating" class="btn-primary" disabled>Enviar Avaliação</button>
+        </div>
+    </div>
+
+    <!-- Rating Results Modal -->
+    <div id="modal-rating-results" class="modal-overlay hidden">
+        <div class="modal-content rating-results-content">
+            <h3>⭐ Avaliações da Sessão</h3>
+            <div id="ratings-list" class="ratings-list"></div>
+            <div id="ratings-average" class="ratings-average"></div>
+            <button id="btn-close-results" class="btn-primary">Fechar</button>
+        </div>
+    </div>
+
+    <!-- Users Sidebar -->
+    <div id="users-sidebar" class="users-sidebar hidden">
+        <div class="sidebar-header">
+            <h3>Espectadores</h3>
+            <button id="btn-close-sidebar" class="btn-icon">
+                <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+            </button>
+        </div>
+        <div id="users-list" class="users-list">
+            <!-- User items injected here -->
+        </div>
+        <div class="sidebar-footer">
+            <div id="self-ping-display" class="ping-display">
+                <span class="ping-dot"></span>
+                <span id="self-ping-value">-- ms</span>
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="/player/index.js"></script>
+</body>
+
+</html>

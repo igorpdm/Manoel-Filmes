@@ -1,0 +1,54 @@
+# === Environment / secrets ===
+.env
+.env.*
+!.env.example
+
+# === Deploy / platform-specific ===
+discloud.config
+.shardcloud
+shardcloud.config
+shardcloud*.config
+
+# === Dependencies ===
+node_modules/
+.pnp/
+.pnp.js
+
+# === Build output ===
+dist/
+build/
+out/
+coverage/
+*.tsbuildinfo
+
+# === Logs ===
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# === Runtime / local files ===
+uploads/
+tmp/
+temp/
+
+# === Local databases / app data ===
+*.db
+*.db-*
+**/movies.db
+**/movies_data.json
+
+# === IDEs ===
+.idea/
+.vscode/
+*.iml
+
+# === OS files ===
+.DS_Store
+Thumbs.db
+
+# === Certificates / keys ===
+*.pem
+*.key
+*.crt

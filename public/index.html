@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Manoel Filmes - A Lenda</title>
+  <link rel="stylesheet" href="/styles.css">
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;700&display=swap" rel="stylesheet">
+</head>
+
+<body>
+  <div class="background-animation"></div>
+  <div class="container landing-container">
+    <header class="main-header">
+      <div class="logo-wrapper">
+        <img src="/logo.jpg" alt="Manoel Filmes Logo" class="brand-logo">
+      </div>
+      <h1 class="brand-title">Manoel Filmes</h1>
+      <p class="brand-subtitle">Cinema de qualidade, azul caneta certified.</p>
+    </header>
+
+    <main class="create-session-card" id="create-card">
+      <h2>Criar Nova Sessão</h2>
+
+      <form id="create-form">
+        <div class="form-group">
+          <label for="session-title">Título da Sessão</label>
+          <input type="text" id="session-title" placeholder="Ex: Maratona do Fim de Semana" required>
+        </div>
+
+        <div class="form-group">
+          <label for="movie-name">O que vamos assistir?</label>
+          <input type="text" id="movie-name" placeholder="Ex: Filme do Pelé" required>
+        </div>
+
+        <button type="submit" id="btn-search" class="btn-primary">
+          <span class="icon">🔍</span>
+          <span class="btn-text">Buscar Filme</span>
+          <div class="spinner-btn hidden"></div>
+        </button>
+      </form>
+
+      <!-- Loading div removed -->
+
+      <div id="error" class="error hidden"></div>
+    </main>
+
+    <!-- Movie Confirmation Card -->
+    <main class="create-session-card movie-confirm-card hidden" id="confirm-card">
+      <button id="btn-back" class="btn-back" title="Voltar">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M19 12H5M12 19l-7-7 7-7" />
+        </svg>
+      </button>
+
+      <div class="movie-confirm-content">
+        <div class="movie-poster-wrapper">
+          <img id="confirm-poster" src="" alt="Poster do Filme" class="movie-poster">
+          <div class="movie-rating-badge" id="confirm-rating">0.0</div>
+        </div>
+
+        <div class="movie-details">
+          <h2 id="confirm-title">Título do Filme</h2>
+          <p class="movie-meta">
+            <span id="confirm-year">2024</span>
+            <span class="dot">•</span>
+            <span id="confirm-genres">Ação, Aventura</span>
+          </p>
+          <p id="confirm-overview" class="movie-overview">Sinopse do filme...</p>
+        </div>
+      </div>
+
+      <div id="episode-selector" class="episode-selector hidden">
+        <h3>Selecione o Episódio</h3>
+        <div class="selector-row">
+          <div class="select-wrapper">
+            <label for="season-select">Temporada</label>
+            <select id="season-select" class="custom-select">
+              <option value="">Selecione...</option>
+            </select>
+          </div>
+          <div class="select-wrapper">
+            <label for="episode-select">Episódio</label>
+            <select id="episode-select" class="custom-select" disabled>
+              <option value="">Selecione a temporada primeiro</option>
+            </select>
+          </div>
+        </div>
+        <div id="episode-info" class="episode-info hidden">
+          <img id="episode-still" src="" alt="">
+          <div class="episode-details">
+            <p id="episode-name" class="episode-name"></p>
+            <p id="episode-overview" class="episode-overview"></p>
+          </div>
+        </div>
+      </div>
+
+      <div class="movie-confirm-actions">
+        <button id="btn-confirm" class="btn-primary">
+          <span>✅</span>
+          <span>Confirmar e Criar Sessão</span>
+        </button>
+        <button id="btn-search-again" class="btn-secondary">
+          <span>🔍</span>
+          <span>Buscar Outro Filme</span>
+        </button>
+      </div>
+
+      <div id="confirm-loading" class="loading hidden">
+        <div class="spinner"></div>
+        <p>Criando sessão...</p>
+      </div>
+    </main>
+
+    <footer class="main-footer">
+      <p>Desenvolvido com 💙 e Caneta Azul</p>
+    </footer>
+  </div>
+
+  <script>
+    const createCard = document.getElementById('create-card');
+    const confirmCard = document.getElementById('confirm-card');
+    const form = document.getElementById('create-form');
+    const errorDiv = document.getElementById('error');
+    const loadingDiv = document.getElementById('loading');
+    const confirmLoadingDiv = document.getElementById('confirm-loading');
+
+    const confirmPoster = document.getElementById('confirm-poster');
+    const confirmTitle = document.getElementById('confirm-title');
+    const confirmYear = document.getElementById('confirm-year');
+    const confirmGenres = document.getElementById('confirm-genres');
+    const confirmOverview = document.getElementById('confirm-overview');
+    const confirmRating = document.getElementById('confirm-rating');
+
+    const btnBack = document.getElementById('btn-back');
+    const btnConfirm = document.getElementById('btn-confirm');
+    const btnSearchAgain = document.getElementById('btn-search-again');
+
+    const episodeSelector = document.getElementById('episode-selector');
+    const seasonSelect = document.getElementById('season-select');
+    const episodeSelect = document.getElementById('episode-select');
+    const episodeInfo = document.getElementById('episode-info');
+    const episodeStill = document.getElementById('episode-still');
+    const episodeName = document.getElementById('episode-name');
+    const episodeOverview = document.getElementById('episode-overview');
+
+    let sessionTitle = '';
+    let currentMovieInfo = null;
+    let selectedEpisode = null;
+
+    const btnSearch = document.getElementById('btn-search');
+    const btnText = btnSearch.querySelector('.btn-text');
+    const btnIcon = btnSearch.querySelector('.icon');
+    const btnSpinner = btnSearch.querySelector('.spinner-btn');
+
+    function toggleSearchLoading(isLoading) {
+      if (isLoading) {
+        btnText.textContent = 'Buscando...';
+        btnIcon.classList.add('hidden');
+        btnSpinner.classList.remove('hidden');
+        btnSearch.disabled = true;
+        btnSearch.style.opacity = '0.8';
+      } else {
+        btnText.textContent = 'Buscar Filme';
+        btnIcon.classList.remove('hidden');
+        btnSpinner.classList.add('hidden');
+        btnSearch.disabled = false;
+        btnSearch.style.opacity = '1';
+      }
+    }
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      errorDiv.classList.add('hidden');
+      toggleSearchLoading(true);
+
+      sessionTitle = document.getElementById('session-title').value;
+      const movieName = document.getElementById('movie-name').value;
+
+      try {
+        const response = await fetch(`/api/search-movie/${encodeURIComponent(movieName)}`);
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(data.error || 'Filme não encontrado');
+        }
+
+        currentMovieInfo = data;
+        showConfirmationScreen(data);
+
+      } catch (err) {
+        toggleSearchLoading(false);
+        errorDiv.textContent = err.message;
+        errorDiv.classList.remove('hidden');
+      }
+    });
+
+    function showConfirmationScreen(movie) {
+      toggleSearchLoading(false);
+      createCard.classList.add('hidden');
+      confirmCard.classList.remove('hidden');
+
+      confirmPoster.src = movie.posterUrl || '/logo.jpg';
+      confirmTitle.textContent = movie.title;
+      confirmYear.textContent = movie.releaseDate ? movie.releaseDate.substring(0, 4) : 'N/A';
+      confirmGenres.textContent = movie.genres?.join(', ') || 'Não especificado';
+      confirmOverview.textContent = movie.overview || 'Sinopse não disponível.';
+      confirmRating.textContent = movie.voteAverage?.toFixed(1) || 'N/A';
+
+      selectedEpisode = null;
+
+      if (movie.mediaType === 'tv' && movie.seasons?.length > 0) {
+        episodeSelector.classList.remove('hidden');
+        populateSeasons(movie.seasons);
+      } else {
+        episodeSelector.classList.add('hidden');
+        resetEpisodeSelectors();
+      }
+    }
+
+    function populateSeasons(seasons) {
+      seasonSelect.innerHTML = '<option value="">Selecione...</option>';
+      seasons.forEach((season, index) => {
+        const option = document.createElement('option');
+        option.value = index;
+        option.textContent = `${season.name} (${season.episodeCount} eps)`;
+        seasonSelect.appendChild(option);
+      });
+      resetEpisodeSelect();
+    }
+
+    function resetEpisodeSelect() {
+      episodeSelect.innerHTML = '<option value="">Selecione a temporada primeiro</option>';
+      episodeSelect.disabled = true;
+      episodeInfo.classList.add('hidden');
+    }
+
+    function resetEpisodeSelectors() {
+      seasonSelect.innerHTML = '<option value="">Selecione...</option>';
+      resetEpisodeSelect();
+    }
+
+    seasonSelect.addEventListener('change', () => {
+      const seasonIndex = seasonSelect.value;
+      if (seasonIndex === '' || !currentMovieInfo?.seasons) {
+        resetEpisodeSelect();
+        return;
+      }
+
+      const season = currentMovieInfo.seasons[parseInt(seasonIndex)];
+      episodeSelect.innerHTML = '<option value="">Selecione...</option>';
+      season.episodes.forEach((ep, index) => {
+        const option = document.createElement('option');
+        option.value = index;
+        option.textContent = `${ep.episodeNumber}. ${ep.name}`;
+        episodeSelect.appendChild(option);
+      });
+      episodeSelect.disabled = false;
+      episodeInfo.classList.add('hidden');
+      selectedEpisode = null;
+    });
+
+    episodeSelect.addEventListener('change', () => {
+      const seasonIndex = seasonSelect.value;
+      const episodeIndex = episodeSelect.value;
+
+      if (seasonIndex === '' || episodeIndex === '' || !currentMovieInfo?.seasons) {
+        episodeInfo.classList.add('hidden');
+        selectedEpisode = null;
+        return;
+      }
+
+      const season = currentMovieInfo.seasons[parseInt(seasonIndex)];
+      const episode = season.episodes[parseInt(episodeIndex)];
+      selectedEpisode = {
+        seasonNumber: season.seasonNumber,
+        episodeNumber: episode.episodeNumber,
+        name: episode.name
+      };
+
+      if (episode.stillPath) {
+        episodeStill.src = episode.stillPath;
+        episodeStill.classList.remove('hidden');
+      } else {
+        episodeStill.classList.add('hidden');
+      }
+
+      episodeName.textContent = `S${season.seasonNumber}E${episode.episodeNumber}: ${episode.name}`;
+      episodeOverview.textContent = episode.overview || 'Sem descrição disponível.';
+      episodeInfo.classList.remove('hidden');
+    });
+
+    btnBack.addEventListener('click', () => {
+      confirmCard.classList.add('hidden');
+      createCard.classList.remove('hidden');
+      resetEpisodeSelectors();
+    });
+
+    btnSearchAgain.addEventListener('click', () => {
+      confirmCard.classList.add('hidden');
+      createCard.classList.remove('hidden');
+      document.getElementById('movie-name').value = '';
+      document.getElementById('movie-name').focus();
+      resetEpisodeSelectors();
+    });
+
+    btnConfirm.addEventListener('click', async () => {
+      confirmLoadingDiv.classList.remove('hidden');
+      document.querySelector('.movie-confirm-actions').classList.add('hidden');
+
+      try {
+        const response = await fetch('/api/create-room', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: sessionTitle,
+            movieName: selectedEpisode 
+              ? `${currentMovieInfo.title} - S${selectedEpisode.seasonNumber}E${selectedEpisode.episodeNumber}`
+              : currentMovieInfo.title,
+            movieInfo: currentMovieInfo,
+            selectedEpisode: selectedEpisode
+          }),
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(data.error || 'Erro ao criar sessão');
+        }
+
+        if (data.hostId) {
+          localStorage.setItem(`host_${data.roomId}`, data.hostId);
+        }
+
+        window.location.href = data.url;
+
+      } catch (err) {
+        confirmLoadingDiv.classList.add('hidden');
+        document.querySelector('.movie-confirm-actions').classList.remove('hidden');
+        alert(err.message);
+      }
+    });
+  </script>
+</body>
+
+</html>
