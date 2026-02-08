@@ -14,6 +14,9 @@ import { createTmdbRouter } from "./routes/tmdb";
 import { createDiscordSessionRouter } from "./routes/discord-session";
 import { createUploadRouter, startUploadCleanup, cleanupRoomUploads } from "./routes/upload";
 import { buildSessionStatusData } from "./services/session-status";
+import { sendRouteError } from "./http/route-error";
+import { ConflictHttpError, ForbiddenHttpError, NotFoundHttpError, ValidationHttpError } from "./http/http-error";
+import { optionalString, requireNonEmptyString, requireObject } from "./http/validation";
 import { fileURLToPath } from "url";
 import { dirname } from "path";
 import { 
@@ -120,6 +123,27 @@ app.use(express.json());
 
 const getSessionStatusData = (roomId: string) => buildSessionStatusData(roomManager, roomId);
 
+interface CreateRoomPayload {
+    videoPath?: string;
+    title: string;
+    movieName: string;
+    movieInfo?: unknown;
+    selectedEpisode?: unknown;
+}
+
+function parseCreateRoomPayload(raw: unknown): CreateRoomPayload {
+    const payload = requireObject(raw);
+    const parsedVideoPath = optionalString(payload.videoPath);
+
+    return {
+        videoPath: parsedVideoPath,
+        title: optionalString(payload.title) || "Sessão de Cinema",
+        movieName: optionalString(payload.movieName) || "Filme Surpresa",
+        movieInfo: payload.movieInfo,
+        selectedEpisode: payload.selectedEpisode,
+    };
+}
+
 // Routes
 const tmdbDeps = { apiKey: TMDB_API_KEY || "", baseUrl: TMDB_BASE_URL, imageBase: TMDB_IMAGE_BASE };
 app.use("/api", createTmdbRouter(tmdbDeps));
@@ -132,43 +156,44 @@ app.use("/api/upload", createUploadRouter(uploadDeps));
 
 // API Routes formerly in manual handler
 app.post("/api/create-room", rateLimit, async (req, res) => {
-    if (roomManager.hasAnyRooms()) {
-        res.status(409).json({ error: "Já existe uma sessão ativa" });
-        return;
+    try {
+        if (roomManager.hasAnyRooms()) {
+            throw new ConflictHttpError("Já existe uma sessão ativa");
+        }
+
+        const payload = parseCreateRoomPayload(req.body);
+
+        if (payload.videoPath) {
+            const resolvedPath = resolve(payload.videoPath);
+            const resolvedUploads = resolve(UPLOADS_DIR);
+            if (!resolvedPath.startsWith(resolvedUploads)) {
+                throw new ForbiddenHttpError("Por segurança, apenas arquivos dentro da pasta 'uploads' são permitidos.");
+            }
+
+            if (!existsSync(payload.videoPath)) {
+                throw new ValidationHttpError("Caminho do vídeo inválido");
+            }
+        }
+
+        const roomId = roomManager.createRoom(payload.videoPath);
+        const room = roomManager.getRoom(roomId);
+        if (room) {
+            room.title = payload.title;
+            room.movieName = payload.movieName;
+            if (payload.movieInfo) {
+                room.movieInfo = payload.movieInfo as any;
+            }
+            if (payload.selectedEpisode) {
+                (room as any).selectedEpisode = payload.selectedEpisode;
+            }
+        }
+
+        const hostId = roomManager.getHostId(roomId);
+        logger.info("API", `Sala criada: room=${roomId} host=${hostId}`);
+        res.json({ roomId, hostId, url: `/room/${roomId}` });
+    } catch (error) {
+        sendRouteError(res, error, "APIServer");
     }
-
-    const { videoPath, title, movieName, movieInfo, selectedEpisode } = req.body;
-
-    if (videoPath) {
-        const resolvedPath = resolve(videoPath);
-        const resolvedUploads = resolve(UPLOADS_DIR);
-        if (!resolvedPath.startsWith(resolvedUploads)) {
-            res.status(403).json({ error: "Por segurança, apenas arquivos dentro da pasta 'uploads' são permitidos." });
-            return;
-        }
-
-        if (!existsSync(videoPath)) {
-            res.status(400).json({ error: "Caminho do vídeo inválido" });
-            return;
-        }
-    }
-
-    const roomId = roomManager.createRoom(videoPath);
-    const room = roomManager.getRoom(roomId);
-    if (room) {
-        room.title = title || 'Sessão de Cinema';
-        room.movieName = movieName || 'Filme Surpresa';
-        if (movieInfo) {
-            room.movieInfo = movieInfo;
-        }
-        if (selectedEpisode) {
-            (room as any).selectedEpisode = selectedEpisode;
-        }
-    }
-
-    const hostId = roomManager.getHostId(roomId);
-    logger.info("API", `Sala criada: room=${roomId} host=${hostId}`);
-    res.json({ roomId, hostId, url: `/room/${roomId}` });
 });
 
 app.get("/api/room-info/:roomId", (req, res) => {
@@ -189,26 +214,29 @@ app.get("/api/room-info/:roomId", (req, res) => {
 });
 
 app.post("/api/end-session/:roomId", async (req, res) => {
-    const { roomId } = req.params;
-    const { hostId } = req.body;
+    try {
+        const { roomId } = req.params;
+        const payload = requireObject(req.body);
+        const hostId = requireNonEmptyString(payload.hostId, "hostId");
 
-    const room = roomManager.getRoom(roomId);
-    if (!room) {
-        res.status(404).json({ error: "Sala não encontrada" });
-        return;
+        const room = roomManager.getRoom(roomId);
+        if (!room) {
+            throw new NotFoundHttpError("Sala não encontrada");
+        }
+
+        if (room.state.hostId !== hostId) {
+            logger.warn("API", `Encerramento negado (host inválido): room=${roomId}`);
+            throw new ForbiddenHttpError("Apenas o host pode encerrar a sessão");
+        }
+
+        logger.info("API", `Encerrando sessão (sem Discord): room=${roomId}`);
+        roomManager.broadcastAll(roomId, { type: "session-ended" });
+        await cleanupRoomUploads(UPLOADS_DIR, roomId);
+        await roomManager.deleteRoom(roomId);
+        res.json({ success: true });
+    } catch (error) {
+        sendRouteError(res, error, "APIServer");
     }
-
-    if (room.state.hostId !== hostId) {
-        logger.warn("API", `Encerramento negado (host inválido): room=${roomId}`);
-        res.status(403).json({ error: "Apenas o host pode encerrar a sessão" });
-        return;
-    }
-
-    logger.info("API", `Encerrando sessão (sem Discord): room=${roomId}`);
-    roomManager.broadcastAll(roomId, { type: "session-ended" });
-    await cleanupRoomUploads(UPLOADS_DIR, roomId);
-    await roomManager.deleteRoom(roomId);
-    res.json({ success: true });
 });
 
 app.get("/api/room-status/:roomId", (req, res) => {

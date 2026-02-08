@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { logger } from "../../shared/logger";
 
 interface TmdbDeps {
   apiKey: string;
@@ -6,6 +7,12 @@ interface TmdbDeps {
   imageBase: string;
 }
 
+/**
+ * Cria rotas HTTP para busca de filmes/séries no TMDB.
+ * @param deps Dependências necessárias para integração com a API do TMDB.
+ * @returns Instância de router com os endpoints de consulta.
+ * @throws Retorna erro HTTP 500 quando a integração externa falha.
+ */
 export function createTmdbRouter(deps: TmdbDeps): Router {
   const router = Router();
 
@@ -98,7 +105,7 @@ export function createTmdbRouter(deps: TmdbDeps): Router {
 
       res.json(movieInfo);
     } catch (e) {
-      console.error("[TMDB] Error:", e);
+      logger.error("TMDBRoute", "Erro ao buscar conteúdo no TMDB", e);
       res.status(500).json({ error: "Erro ao buscar conteúdo" });
     }
   });
