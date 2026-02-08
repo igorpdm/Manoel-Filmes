@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { cleanupRoomUploads } from "./upload";
 import type { RoomManager } from "../../core/room-manager";
+import type { DiscordSession, MovieInfo, SelectedEpisode } from "../../shared/types";
 import { logger } from "../../shared/logger";
 import { sendRouteError } from "../http/route-error";
 import {
@@ -17,20 +18,12 @@ interface DiscordSessionDeps {
   uploadsDir: string;
 }
 
-interface DiscordSessionInput {
-  channelId: string;
-  messageId: string;
-  guildId: string;
-  hostDiscordId: string;
-  hostUsername?: string;
-}
-
 interface CreateDiscordSessionPayload {
   title: string;
   movieName: string;
-  movieInfo?: unknown;
-  selectedEpisode?: unknown;
-  discordSession: DiscordSessionInput;
+  movieInfo?: MovieInfo;
+  selectedEpisode?: SelectedEpisode;
+  discordSession: DiscordSession & { hostUsername?: string };
 }
 
 interface SessionTokenPayload {
@@ -47,7 +40,7 @@ interface HostTokenPayload {
   token: string;
 }
 
-function parseDiscordSessionInput(raw: unknown): DiscordSessionInput {
+function parseDiscordSessionInput(raw: unknown): DiscordSession & { hostUsername?: string } {
   const sessionObject = requireObject(raw, "discordSession");
 
   return {
@@ -59,14 +52,40 @@ function parseDiscordSessionInput(raw: unknown): DiscordSessionInput {
   };
 }
 
+function parseSelectedEpisode(value: unknown): SelectedEpisode | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+
+  const parsed = value as Record<string, unknown>;
+  const seasonNumber = Number(parsed.seasonNumber);
+  const episodeNumber = Number(parsed.episodeNumber);
+  const name = typeof parsed.name === "string" ? parsed.name.trim() : "";
+
+  if (!Number.isFinite(seasonNumber) || !Number.isFinite(episodeNumber) || !name) {
+    return undefined;
+  }
+
+  return {
+    id: typeof parsed.id === "number" ? parsed.id : undefined,
+    seasonNumber,
+    episodeNumber,
+    name,
+    overview: typeof parsed.overview === "string" ? parsed.overview : undefined,
+    stillPath: typeof parsed.stillPath === "string" || parsed.stillPath === null ? parsed.stillPath : undefined,
+    airDate: typeof parsed.airDate === "string" ? parsed.airDate : undefined,
+    runtime: typeof parsed.runtime === "number" ? parsed.runtime : undefined,
+  };
+}
+
 function parseCreateDiscordSessionPayload(raw: unknown): CreateDiscordSessionPayload {
   const payload = requireObject(raw);
 
   return {
     title: optionalString(payload.title) || "Sessão de Cinema",
     movieName: optionalString(payload.movieName) || "Filme",
-    movieInfo: payload.movieInfo,
-    selectedEpisode: payload.selectedEpisode,
+    movieInfo: payload.movieInfo && typeof payload.movieInfo === "object" ? (payload.movieInfo as MovieInfo) : undefined,
+    selectedEpisode: parseSelectedEpisode(payload.selectedEpisode),
     discordSession: parseDiscordSessionInput(payload.discordSession),
   };
 }
@@ -134,7 +153,7 @@ export function createDiscordSessionRouter(deps: DiscordSessionDeps): Router {
       const result = deps.roomManager.createDiscordSession(
         payload.title,
         payload.movieName,
-        payload.movieInfo as any,
+        payload.movieInfo,
         payload.discordSession,
         payload.selectedEpisode
       );

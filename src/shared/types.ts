@@ -1,5 +1,4 @@
 import { WebSocket } from "ws";
-import type { Request } from "express";
 
 export interface ExtendedWebSocket extends WebSocket {
     data: ClientData;
@@ -59,6 +58,17 @@ export interface MovieInfo {
     seasons?: Season[];
 }
 
+export interface SelectedEpisode {
+    id?: number;
+    seasonNumber: number;
+    episodeNumber: number;
+    name: string;
+    overview?: string;
+    stillPath?: string | null;
+    airDate?: string;
+    runtime?: number | null;
+}
+
 export interface DiscordUser {
     discordId: string;
     username: string;
@@ -97,6 +107,7 @@ export interface Room {
     title?: string;
     movieName?: string;
     movieInfo?: MovieInfo;
+    selectedEpisode?: SelectedEpisode;
     discordSession?: DiscordSession;
     tokenMap: Map<string, DiscordUser>;
     ratings: SessionRating[];
@@ -162,4 +173,3 @@ export interface WSMessage {
     newHostUsername?: string;
     metrics?: ClientMetrics;
 }
-

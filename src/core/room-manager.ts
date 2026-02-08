@@ -1,5 +1,18 @@
 import { WebSocket } from "ws";
-import type { Room, RoomState, ClientData, WSMessage, DiscordUser, DiscordSession, SessionRating, SessionStatus, MovieInfo, ClientMetrics, ExtendedWebSocket } from "../shared/types";
+import type {
+    Room,
+    RoomState,
+    ClientData,
+    WSMessage,
+    DiscordUser,
+    DiscordSession,
+    SessionRating,
+    SessionStatus,
+    MovieInfo,
+    ClientMetrics,
+    ExtendedWebSocket,
+    SelectedEpisode
+} from "../shared/types";
 import { existsSync, statSync } from "fs";
 import { rm } from "fs/promises";
 import { randomUUID, randomBytes } from "crypto";
@@ -44,8 +57,8 @@ export class RoomManager {
         title: string,
         movieName: string,
         movieInfo: MovieInfo | undefined,
-        discordSession: DiscordSession,
-        selectedEpisode?: any
+        discordSession: DiscordSession & { hostUsername?: string },
+        selectedEpisode?: SelectedEpisode
     ): { roomId: string; hostToken: string } | null {
         if (this.activeDiscordSession || this.rooms.size > 0) {
             return null;
@@ -57,7 +70,7 @@ export class RoomManager {
 
         const hostUser: DiscordUser = {
             discordId: discordSession.hostDiscordId,
-            username: (discordSession as any).hostUsername || 'Host',
+            username: discordSession.hostUsername || 'Host',
             isHost: true,
             connected: false,
             connectedAt: Date.now(),
@@ -85,15 +98,12 @@ export class RoomManager {
             title,
             movieName,
             movieInfo,
+            selectedEpisode,
             discordSession,
             tokenMap: new Map([[hostToken, hostUser]]),
             ratings: [],
             status: 'waiting'
         };
-
-        if (selectedEpisode) {
-            (room as any).selectedEpisode = selectedEpisode;
-        }
 
         this.rooms.set(roomId, room);
         this.activeDiscordSession = roomId;

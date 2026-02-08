@@ -6,7 +6,7 @@ import { existsSync, statSync, mkdirSync, createReadStream } from "fs";
 import { join, resolve } from "path";
 import cors from "cors"; // Although not strictly used in original, good to have.
 import { roomManager } from "../core/room-manager";
-import type { ClientData, WSMessage, ExtendedWebSocket } from "../shared/types";
+import type { ClientData, WSMessage, ExtendedWebSocket, MovieInfo, SelectedEpisode } from "../shared/types";
 import { handleWebSocketMessage } from "./websocket-handler";
 import { logger } from "../shared/logger";
 
@@ -127,8 +127,34 @@ interface CreateRoomPayload {
     videoPath?: string;
     title: string;
     movieName: string;
-    movieInfo?: unknown;
-    selectedEpisode?: unknown;
+    movieInfo?: MovieInfo;
+    selectedEpisode?: SelectedEpisode;
+}
+
+function parseSelectedEpisode(value: unknown): SelectedEpisode | undefined {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+        return undefined;
+    }
+
+    const parsed = value as Record<string, unknown>;
+    const seasonNumber = Number(parsed.seasonNumber);
+    const episodeNumber = Number(parsed.episodeNumber);
+    const name = typeof parsed.name === "string" ? parsed.name.trim() : "";
+
+    if (!Number.isFinite(seasonNumber) || !Number.isFinite(episodeNumber) || !name) {
+        return undefined;
+    }
+
+    return {
+        id: typeof parsed.id === "number" ? parsed.id : undefined,
+        seasonNumber,
+        episodeNumber,
+        name,
+        overview: typeof parsed.overview === "string" ? parsed.overview : undefined,
+        stillPath: typeof parsed.stillPath === "string" || parsed.stillPath === null ? parsed.stillPath : undefined,
+        airDate: typeof parsed.airDate === "string" ? parsed.airDate : undefined,
+        runtime: typeof parsed.runtime === "number" ? parsed.runtime : undefined,
+    };
 }
 
 function parseCreateRoomPayload(raw: unknown): CreateRoomPayload {
@@ -139,8 +165,8 @@ function parseCreateRoomPayload(raw: unknown): CreateRoomPayload {
         videoPath: parsedVideoPath,
         title: optionalString(payload.title) || "Sessão de Cinema",
         movieName: optionalString(payload.movieName) || "Filme Surpresa",
-        movieInfo: payload.movieInfo,
-        selectedEpisode: payload.selectedEpisode,
+        movieInfo: payload.movieInfo && typeof payload.movieInfo === "object" ? (payload.movieInfo as MovieInfo) : undefined,
+        selectedEpisode: parseSelectedEpisode(payload.selectedEpisode),
     };
 }
 
@@ -181,10 +207,10 @@ app.post("/api/create-room", rateLimit, async (req, res) => {
             room.title = payload.title;
             room.movieName = payload.movieName;
             if (payload.movieInfo) {
-                room.movieInfo = payload.movieInfo as any;
+                room.movieInfo = payload.movieInfo;
             }
             if (payload.selectedEpisode) {
-                (room as any).selectedEpisode = payload.selectedEpisode;
+                room.selectedEpisode = payload.selectedEpisode;
             }
         }
 
@@ -209,7 +235,7 @@ app.get("/api/room-info/:roomId", (req, res) => {
         movieName: room.movieName || "Filme",
         viewerCount: connectedUsers.length,
         movieInfo: room.movieInfo || null,
-        selectedEpisode: (room as any).selectedEpisode || null
+        selectedEpisode: room.selectedEpisode || null
     });
 });
 

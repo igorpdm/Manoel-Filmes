@@ -1,17 +1,14 @@
+import type { DiscordSession, MovieInfo, SelectedEpisode, SessionRating } from "../../shared/types";
+import { logger } from "../../shared/logger";
+
 const PLAYER_BASE_URL = process.env.PLAYER_URL || "http://localhost:3000";
 
 interface CreateSessionData {
     title: string;
     movieName: string;
-    movieInfo?: any;
-    discordSession: {
-        channelId: string;
-        messageId: string;
-        guildId: string;
-        hostDiscordId: string;
-        hostUsername?: string;
-    };
-    selectedEpisode?: any;
+    movieInfo?: MovieInfo;
+    discordSession: DiscordSession & { hostUsername?: string };
+    selectedEpisode?: SelectedEpisode;
 }
 
 interface SessionResult {
@@ -29,18 +26,18 @@ interface SessionStatus {
     status: "waiting" | "playing" | "ended";
     viewerCount: number;
     viewers: { discordId: string; username: string }[];
-    ratings: { discordId: string; username: string; rating: number }[];
+    ratings: SessionRating[];
     average: number;
     allRated?: boolean;
-    movieInfo: any;
+    movieInfo: MovieInfo | null;
     movieName: string;
 }
 
 interface EndResult {
     success: boolean;
-    ratings: { discordId: string; username: string; rating: number }[];
+    ratings: SessionRating[];
     average: number;
-    discordSession: any;
+    discordSession?: DiscordSession;
 }
 
 /**
@@ -59,13 +56,13 @@ export async function createDiscordSession(data: CreateSessionData): Promise<Ses
 
         if (!response.ok) {
             const error = await response.json();
-            console.error("[PlayerAPI] Erro ao criar sessão:", error);
+            logger.error("PlayerAPI", "Erro ao criar sessão", error);
             return null;
         }
 
         return await response.json();
     } catch (error) {
-        console.error("[PlayerAPI] Erro de conexão:", error);
+        logger.error("PlayerAPI", "Erro de conexão ao criar sessão", error);
         return null;
     }
 }
@@ -95,7 +92,7 @@ export async function generateUserToken(
 
         return await response.json();
     } catch (error) {
-        console.error("[PlayerAPI] Erro ao gerar token:", error);
+        logger.error("PlayerAPI", "Erro ao gerar token de sessão", error);
         return null;
     }
 }
@@ -115,7 +112,7 @@ export async function getSessionStatus(roomId: string): Promise<SessionStatus | 
 
         return await response.json();
     } catch (error) {
-        console.error("[PlayerAPI] Erro ao obter status:", error);
+        logger.error("PlayerAPI", "Erro ao obter status da sessão", error);
         return null;
     }
 }
@@ -136,7 +133,7 @@ export async function endDiscordSession(roomId: string, token: string): Promise<
 
         return response.ok;
     } catch (error) {
-        console.error("[PlayerAPI] Erro ao encerrar sessão:", error);
+        logger.error("PlayerAPI", "Erro ao encerrar sessão", error);
         return false;
     }
 }
@@ -161,7 +158,7 @@ export async function finalizeSession(roomId: string, token: string): Promise<En
 
         return await response.json();
     } catch (error) {
-        console.error("[PlayerAPI] Erro ao finalizar sessão:", error);
+        logger.error("PlayerAPI", "Erro ao finalizar sessão", error);
         return null;
     }
 }
