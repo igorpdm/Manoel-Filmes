@@ -3,25 +3,17 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, promises as
 import { rm } from "fs/promises";
 import { join, basename } from "path";
 import type { Request, Response } from "express";
-import type { RoomManager } from "../../core/room-manager";
 import { MediaProcessor } from "../services/media-processor";
-
-interface UploadDeps {
-  roomManager: typeof RoomManager.prototype;
-  uploadsDir: string;
-}
-
-interface UploadMeta {
-  roomId: string;
-  uploadId: string;
-  filename: string;
-  totalChunks: number;
-  chunkSize: number;
-  totalSize: number;
-  receivedChunks: number[];
-  createdAt: number;
-  lastActivity: number;
-}
+import { logger } from "../../shared/logger";
+import type { UploadDeps, UploadMeta } from "./upload-types";
+import { getAuthFromRequest, ensureUploadAuthorized } from "./upload-auth";
+import {
+  decodeSubtitleBuffer,
+  getPartPath,
+  getSubtitlesDir,
+  listRoomUploadDirs,
+  sanitizeUploadFilename,
+} from "./upload-paths";
 
 const activeUploadsByRoom = new Map<string, string>();
 const UPLOAD_TTL_MS = 30 * 60 * 1000;
@@ -93,7 +85,7 @@ async function closeUploadHandle(uploadId: string) {
     try {
       await cached.handle.close();
     } catch (e) {
-      console.error(`[Upload] Error closing handle for ${uploadId}:`, e);
+      logger.error("UploadRoute", `Falha ao fechar handle do upload ${uploadId}`, e);
     }
     fileHandleCache.delete(uploadId);
   }
@@ -199,22 +191,9 @@ async function removeUpload(chunksDir: string) {
     try {
       await rm(chunksDir, { recursive: true, force: true });
     } catch (e) {
-      console.error(`[Upload] Failed to remove upload dir ${chunksDir}:`, e);
+      logger.error("UploadRoute", `Falha ao remover pasta de upload ${chunksDir}`, e);
     }
   }
-}
-
-function listRoomUploadDirs(uploadsDir: string, roomId: string) {
-  if (!existsSync(uploadsDir)) return [];
-  const entries = readdirSync(uploadsDir, { withFileTypes: true });
-  const prefix = `${roomId}_`;
-  return entries
-    .filter(entry => entry.isDirectory() && entry.name.startsWith(prefix))
-    .map(entry => join(uploadsDir, entry.name));
-}
-
-function getPartPath(chunksDir: string) {
-  return join(chunksDir, "upload.part");
 }
 
 async function cleanupUploads(uploadsDir: string) {
@@ -255,59 +234,22 @@ async function cleanupUploads(uploadsDir: string) {
   }
 }
 
-function getAuthFromRequest(request: Request, body?: any) {
-  const token = (body?.token || request.headers["x-room-token"] || "") as string;
-  const hostId = (body?.hostId || request.headers["x-host-id"] || "") as string;
-  return { token, hostId };
-}
-
-function ensureUploadAuthorized(roomId: string, token: string, hostId: string, deps: UploadDeps): { error: string, status: number } | null {
-  const room = deps.roomManager.getRoom(roomId);
-  if (!room) {
-    return { error: "Sala não encontrada", status: 404 };
-  }
-
-  if (room.status === 'ended') {
-    return { error: "Sessão encerrada", status: 403 };
-  }
-
-  if (room.discordSession) {
-    if (!token || !deps.roomManager.isHostByToken(roomId, token)) {
-      return { error: "Sem permissão para upload", status: 403 };
-    }
-  } else {
-    if (!hostId || room.state.hostId !== hostId) {
-      return { error: "Sem permissão para upload", status: 403 };
-    }
-  }
-
-  return null;
-}
-
-function getSubtitlesDir(uploadsDir: string, roomId: string): string {
-  return join(uploadsDir, `${roomId}_subtitles`);
-}
-
-function decodeSubtitleBuffer(buffer: Buffer): string {
-  // UTF-8 BOM
-  if (buffer[0] === 0xEF && buffer[1] === 0xBB && buffer[2] === 0xBF) {
-    return buffer.subarray(3).toString("utf-8");
-  }
-
-  const utf8 = buffer.toString("utf-8");
-
-  // Se não contém replacement char, é UTF-8 válido
-  if (!utf8.includes("\uFFFD")) return utf8;
-
-  // Fallback: Windows-1252 (superset de Latin-1, comum em legendas em português)
-  const decoder = new TextDecoder("windows-1252");
-  return decoder.decode(buffer);
-}
-
+/**
+ * Inicia limpeza periódica de uploads temporários expirados.
+ * @param uploadsDir Diretório base de uploads.
+ * @returns Nada.
+ */
 export function startUploadCleanup(uploadsDir: string) {
   setInterval(() => cleanupUploads(uploadsDir), CLEANUP_INTERVAL);
 }
 
+/**
+ * Remove arquivos temporários de upload e legendas de uma sala.
+ * @param uploadsDir Diretório base de uploads.
+ * @param roomId Identificador da sala.
+ * @returns Promise finalizada após a limpeza.
+ * @throws Pode lançar erro de infraestrutura de sistema de arquivos.
+ */
 export async function cleanupRoomUploads(uploadsDir: string, roomId: string) {
   const activeUploadId = activeUploadsByRoom.get(roomId);
   if (activeUploadId) {
@@ -338,11 +280,17 @@ export async function cleanupRoomUploads(uploadsDir: string, roomId: string) {
     try {
       await rm(subtitlesDir, { recursive: true, force: true });
     } catch (e) {
-      console.error(`[Upload] Failed to remove subtitles dir ${subtitlesDir}:`, e);
+      logger.error("UploadRoute", `Falha ao remover pasta de legendas ${subtitlesDir}`, e);
     }
   }
 }
 
+/**
+ * Cria rotas HTTP para upload em chunks, retomada e legendas.
+ * @param deps Dependências para autorização e gestão de estado da sala.
+ * @returns Instância de router com endpoints de upload.
+ * @throws Retorna erros HTTP de validação, autorização e infraestrutura.
+ */
 export function createUploadRouter(deps: UploadDeps): Router {
   const router = Router();
 
@@ -451,7 +399,7 @@ export function createUploadRouter(deps: UploadDeps): Router {
     }
 
     const uploadId = `${roomId}_${Date.now()}`;
-    const safeFilename = filename.replace(/[^a-zA-Z0-9._-]/g, "_");
+    const safeFilename = sanitizeUploadFilename(filename);
     const chunksDir = join(deps.uploadsDir, uploadId);
 
     mkdirSync(chunksDir, { recursive: true });
@@ -532,7 +480,7 @@ export function createUploadRouter(deps: UploadDeps): Router {
         offset += chunk.length;
       }
     } catch (e) {
-      console.error(`[Upload] Error writing chunk ${chunkIndex} for ${uploadId}:`, e);
+      logger.error("UploadRoute", `Falha ao escrever chunk ${chunkIndex} do upload ${uploadId}`, e);
       const remaining = (activeWriteCounts.get(uploadId) || 1) - 1;
       if (remaining <= 0) {
         activeWriteCounts.delete(uploadId);
@@ -582,7 +530,7 @@ export function createUploadRouter(deps: UploadDeps): Router {
     const { filename, totalChunks } = body;
 
     const chunksDir = join(deps.uploadsDir, uploadId);
-    const safeFilename = filename.replace(/[^a-zA-Z0-9._-]/g, "_");
+    const safeFilename = sanitizeUploadFilename(filename);
     
     const meta = metaCache.get(uploadId);
     if (!meta || meta.roomId !== roomId) {
@@ -636,7 +584,7 @@ export function createUploadRouter(deps: UploadDeps): Router {
             });
             deps.roomManager.broadcastAll(roomId, { type: "video-ready" });
         } catch (err) {
-            console.error(`[Upload] Error processing media for room ${roomId}:`, err);
+            logger.error("UploadRoute", `Falha ao processar mídia da sala ${roomId}`, err);
             deps.roomManager.updateState(roomId, { 
                 isProcessing: false, 
                 processingMessage: 'Erro no processamento' 
@@ -670,7 +618,9 @@ export function createUploadRouter(deps: UploadDeps): Router {
       const chunksDir = join(deps.uploadsDir, effectiveUploadId);
       if (existsSync(chunksDir)) {
         activeUploadsByRoom.set(roomId, effectiveUploadId);
-        markActivity(chunksDir, effectiveUploadId).catch(console.error);
+        markActivity(chunksDir, effectiveUploadId).catch((error) => {
+          logger.error("UploadRoute", `Falha ao marcar atividade do upload ${effectiveUploadId}`, error);
+        });
 
         const meta = metaCache.get(effectiveUploadId) || await getOrLoadMeta(chunksDir, effectiveUploadId);
         if (meta && meta.roomId === roomId) {
@@ -713,7 +663,7 @@ export function createUploadRouter(deps: UploadDeps): Router {
     const buffer = Buffer.concat(chunks);
 
     const rawFilename = (req.headers["x-filename"] as string) || "subtitle.srt";
-    const safeFilename = basename(rawFilename).replace(/[^a-zA-Z0-9._-]/g, "_");
+    const safeFilename = sanitizeUploadFilename(basename(rawFilename));
     const displayName = rawFilename.replace(/\.srt$/i, "");
     const filePath = join(subtitlesDir, safeFilename);
 
@@ -768,7 +718,7 @@ export function createUploadRouter(deps: UploadDeps): Router {
       const content = decodeSubtitleBuffer(buffer);
       res.send(content);
     } catch (e) {
-      console.error(`[Upload] Failed to read subtitle ${filePath}:`, e);
+      logger.error("UploadRoute", `Falha ao ler legenda ${filePath}`, e);
       res.status(500).json({ error: "Erro ao ler legenda" });
     }
   });
@@ -798,7 +748,7 @@ export function createUploadRouter(deps: UploadDeps): Router {
       try {
         await rm(filePath, { force: true });
       } catch (e) {
-        console.error(`[Upload] Failed to delete subtitle ${filePath}:`, e);
+        logger.error("UploadRoute", `Falha ao remover legenda ${filePath}`, e);
       }
     }
     deps.roomManager.removeSubtitle(roomId, filename);
