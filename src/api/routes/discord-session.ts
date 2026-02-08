@@ -194,12 +194,19 @@ export function createDiscordSessionRouter(deps: DiscordSessionDeps): Router {
     res.json({ success: true, status: "ending" });
   });
 
-  router.post("/discord-finalize-session/:roomId", (req, res) => {
+  router.post("/discord-finalize-session/:roomId", async (req, res) => {
     const { roomId } = req.params;
     const room = deps.roomManager.getRoom(roomId);
 
     if (!room) {
       res.status(404).json({ error: "Sessão não encontrada" });
+      return;
+    }
+
+    const { token } = req.body || {};
+    if (!token || !deps.roomManager.isHostByToken(roomId, token)) {
+      console.log(`[DiscordSession] Finalização negada (não host): room=${roomId}`);
+      res.status(403).json({ error: "Apenas o host pode finalizar" });
       return;
     }
 
@@ -209,8 +216,12 @@ export function createDiscordSessionRouter(deps: DiscordSessionDeps): Router {
     console.log(`[DiscordSession] Finalizando sessão: room=${roomId} média=${average}`);
 
     deps.roomManager.broadcastAll(roomId, { type: "session-ended" });
-    cleanupRoomUploads(deps.uploadsDir, roomId);
-    deps.roomManager.deleteRoom(roomId);
+    try {
+      await cleanupRoomUploads(deps.uploadsDir, roomId);
+      await deps.roomManager.deleteRoom(roomId);
+    } catch (error) {
+      console.error(`[DiscordSession] Falha ao finalizar recursos da sala ${roomId}:`, error);
+    }
 
     res.json({
       success: true,

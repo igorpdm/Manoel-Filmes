@@ -233,7 +233,7 @@ async function finalizeSession(session: ActiveWatchSession, ratings: any[]) {
             await db.addVote(session.movieName, r.discordId, r.username, r.rating);
         }
 
-        await playerApi.finalizeSession(session.roomId);
+        await playerApi.finalizeSession(session.roomId, session.hostToken);
     } catch (dbError) {
         console.error("[SessionMonitor] Failed to persist session data:", dbError);
     }

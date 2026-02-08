@@ -117,11 +117,12 @@ export async function endDiscordSession(roomId: string, token: string): Promise<
     }
 }
 
-export async function finalizeSession(roomId: string): Promise<EndResult | null> {
+export async function finalizeSession(roomId: string, token: string): Promise<EndResult | null> {
     try {
         const response = await fetch(`${PLAYER_BASE_URL}/api/discord-finalize-session/${roomId}`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ token }),
         });
 
         if (!response.ok) {
