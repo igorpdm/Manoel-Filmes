@@ -115,6 +115,12 @@ function ensureHostToken(deps: DiscordSessionDeps, roomId: string, token: string
   }
 }
 
+/**
+ * Cria rotas HTTP para ciclo de vida de sessões ligadas ao Discord.
+ * @param deps Dependências de estado de sala e funções auxiliares de sessão.
+ * @returns Instância de router com endpoints de sessão.
+ * @throws Retorna erros HTTP de validação, permissão, conflito e infraestrutura.
+ */
 export function createDiscordSessionRouter(deps: DiscordSessionDeps): Router {
   const router = Router();
 

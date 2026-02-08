@@ -43,6 +43,12 @@ interface EndResult {
     discordSession: any;
 }
 
+/**
+ * Cria uma sessão de reprodução integrada ao Discord.
+ * @param data Dados da sessão, filme e contexto do Discord.
+ * @returns Resultado com roomId e hostToken quando sucesso; null quando falha.
+ * @throws Retorna null em erros de rede ou resposta inválida.
+ */
 export async function createDiscordSession(data: CreateSessionData): Promise<SessionResult | null> {
     try {
         const response = await fetch(`${PLAYER_BASE_URL}/api/discord-session`, {
@@ -64,6 +70,13 @@ export async function createDiscordSession(data: CreateSessionData): Promise<Ses
     }
 }
 
+/**
+ * Gera token de acesso para um usuário entrar em uma sessão.
+ * @param roomId Identificador da sala.
+ * @param discordId Identificador do usuário no Discord.
+ * @param username Nome de exibição do usuário.
+ * @returns Token e URL de acesso quando sucesso; null quando falha.
+ */
 export async function generateUserToken(
     roomId: string,
     discordId: string,
@@ -87,6 +100,11 @@ export async function generateUserToken(
     }
 }
 
+/**
+ * Consulta o status atual de uma sessão de reprodução.
+ * @param roomId Identificador da sala.
+ * @returns Status da sessão quando encontrado; null caso contrário.
+ */
 export async function getSessionStatus(roomId: string): Promise<SessionStatus | null> {
     try {
         const response = await fetch(`${PLAYER_BASE_URL}/api/session-status/${roomId}`);
@@ -102,6 +120,12 @@ export async function getSessionStatus(roomId: string): Promise<SessionStatus | 
     }
 }
 
+/**
+ * Solicita encerramento da sessão pelo host.
+ * @param roomId Identificador da sala.
+ * @param token Token do host.
+ * @returns true quando o servidor aceita o encerramento.
+ */
 export async function endDiscordSession(roomId: string, token: string): Promise<boolean> {
     try {
         const response = await fetch(`${PLAYER_BASE_URL}/api/discord-end-session/${roomId}`, {
@@ -117,6 +141,12 @@ export async function endDiscordSession(roomId: string, token: string): Promise<
     }
 }
 
+/**
+ * Finaliza a sessão e retorna consolidação de notas.
+ * @param roomId Identificador da sala.
+ * @param token Token do host autorizado.
+ * @returns Resultado final da sessão quando sucesso; null em falhas.
+ */
 export async function finalizeSession(roomId: string, token: string): Promise<EndResult | null> {
     try {
         const response = await fetch(`${PLAYER_BASE_URL}/api/discord-finalize-session/${roomId}`, {
@@ -136,6 +166,10 @@ export async function finalizeSession(roomId: string, token: string): Promise<En
     }
 }
 
+/**
+ * Retorna a URL base do player configurada no ambiente.
+ * @returns URL base do player.
+ */
 export function getPlayerUrl(): string {
     return PLAYER_BASE_URL;
 }
