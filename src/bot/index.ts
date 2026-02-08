@@ -7,6 +7,7 @@ import { buildMovieVoteEmbed } from "./ui/embeds";
 import { buildVotingComponents } from "./ui/components";
 import { toMovieId } from "./utils";
 import { votingCache } from "./state";
+import { logger } from "../shared/logger";
 
 import { startSessionMonitor } from "./services/session-monitor";
 
@@ -40,7 +41,8 @@ const restoreActiveVotings = async () => {
         message.guild
       );
       await message.edit({ embeds: [embed], components: buildVotingComponents(movieId) });
-    } catch {
+    } catch (error) {
+      logger.warn("BotBootstrap", `Falha ao restaurar votação ativa: ${movieKey}`, error);
       await db.removeActiveVoting(movieKey);
     }
   }
@@ -53,8 +55,8 @@ client.once("clientReady", async () => {
   await restoreActiveVotings();
   startSessionMonitor(client);
   await client.user?.setPresence({ activities: [{ name: "filme dos crias", type: 3 }] });
-  console.log(`🎬 Bot ${client.user?.tag} conectado!`);
-  console.log(`📊 Servidores: ${client.guilds.cache.size}`);
+  logger.success("BotBootstrap", `Bot ${client.user?.tag} conectado`);
+  logger.info("BotBootstrap", `Servidores conectados: ${client.guilds.cache.size}`);
 });
 
 registerInteractionHandlers(client);

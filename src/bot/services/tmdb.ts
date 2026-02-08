@@ -1,5 +1,6 @@
 import axios from "axios";
 import { TMDB_API_KEY, TMDB_BASE_URL, TMDB_IMAGE_BASE } from "../../config";
+import { logger } from "../../shared/logger";
 
 const tmdbApi = axios.create({
   timeout: 10000,
@@ -74,6 +75,7 @@ export const searchMovieTmdb = async (title: string) => {
               })),
             };
           } catch {
+            logger.warn("TmdbService", `Falha ao carregar temporada ${season.season_number} de ${item.id}`);
             return null;
           }
         });
@@ -94,7 +96,8 @@ export const searchMovieTmdb = async (title: string) => {
       media_type: item.media_type,
       seasons: seasons.length ? seasons : undefined,
     };
-  } catch {
+  } catch (error) {
+    logger.error("TmdbService", `Falha ao buscar mídia: ${title}`, error);
     return null;
   }
 };
