@@ -4,6 +4,8 @@ import {
     updateSyncStatus,
     updateHostUI,
     showPlayer,
+    showUploadProgress,
+    showProcessingProgress,
     showRatingModal,
     showRatingsResults,
     handleSessionEnded,
@@ -199,33 +201,18 @@ function handleMessage(data) {
             }
             break;
         case 'upload-start':
+            showUploadProgress(0);
             if (!state.isHost) {
-                dom.waitingOverlay.classList.remove('hidden');
-                dom.uploadZone.classList.add('hidden');
-                dom.waitingOverlay.querySelector('h2').textContent = 'Aguardando Envío';
-                dom.waitingOverlay.querySelector('p').textContent = `O host iniciou o envio: ${data.filename}`;
+                const filename = data.filename || 'arquivo';
+                dom.waitingOverlay.querySelector('p').textContent = `O host iniciou o envio: ${filename}`;
             }
             break;
         case 'upload-progress':
-            if (!state.isHost) {
-                dom.waitingOverlay.classList.remove('hidden');
-                dom.uploadZone.classList.add('hidden');
-                dom.playerOverlay.classList.add('hidden');
-                dom.waitingOverlay.querySelector('h2').textContent = 'Aguardando Envío';
-                dom.waitingOverlay.querySelector('p').textContent = `O host está enviando o filme: ${data.progress}%`;
-            }
+            showUploadProgress(data.progress || 0);
             break;
         case 'processing-progress':
             const msg = data.processingMessage || 'Processando vídeo...';
-            if (state.isHost) {
-                 if (dom.uploadStatus) dom.uploadStatus.textContent = msg;
-            } else {
-                dom.waitingOverlay.classList.remove('hidden');
-                dom.uploadZone.classList.add('hidden');
-                dom.playerOverlay.classList.add('hidden');
-                dom.waitingOverlay.querySelector('h2').textContent = 'Processando';
-                dom.waitingOverlay.querySelector('p').textContent = msg;
-            }
+            showProcessingProgress(msg);
             break;
         case 'video-ready':
             showPlayer();

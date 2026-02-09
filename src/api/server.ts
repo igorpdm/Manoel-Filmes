@@ -74,7 +74,7 @@ const app = express();
 const server = createServer(app);
 const wss = new WebSocketServer({ noServer: true });
 
-// Rate Limiting
+// Limite de requisições.
 const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
 const RATE_LIMIT = 120;
 const RATE_WINDOW = 60000;
@@ -107,7 +107,7 @@ setInterval(() => {
     }
 }, 60000);
 
-// CORS Configuration
+// Configuração de CORS.
 const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(",").filter(Boolean) || [];
 app.use(cors({
     origin: (origin, callback) => {
@@ -170,7 +170,7 @@ function parseCreateRoomPayload(raw: unknown): CreateRoomPayload {
     };
 }
 
-// Routes
+// Rotas.
 const tmdbDeps = { apiKey: TMDB_API_KEY || "", baseUrl: TMDB_BASE_URL, imageBase: TMDB_IMAGE_BASE };
 app.use("/api", createTmdbRouter(tmdbDeps));
 
@@ -180,7 +180,7 @@ app.use("/api", createDiscordSessionRouter(discordSessionDeps));
 const uploadDeps = { roomManager, uploadsDir: UPLOADS_DIR };
 app.use("/api/upload", createUploadRouter(uploadDeps));
 
-// API Routes formerly in manual handler
+// Rotas de API principais.
 app.post("/api/create-room", rateLimit, async (req, res) => {
     try {
         if (roomManager.hasAnyRooms()) {
@@ -281,7 +281,7 @@ app.get("/api/room-status/:roomId", (req, res) => {
     });
 });
 
-// Video Streaming Route
+// Rota de streaming de vídeo.
 app.get("/video/:roomId", (req, res) => {
     const { roomId } = req.params;
     const room = roomManager.getRoom(roomId);
@@ -337,7 +337,7 @@ app.get("/video/:roomId", (req, res) => {
     }
 });
 
-// Serve frontend files
+// Arquivos estáticos do frontend.
 app.use(express.static(PUBLIC_DIR));
 
 app.get("/", (req, res) => {
@@ -357,7 +357,7 @@ app.get("/room/:roomId", (req, res) => {
     res.sendFile(join(PUBLIC_DIR, "room.html"));
 });
 
-// WebSocket Upgrade Handling
+// Tratamento de upgrade para WebSocket.
 server.on('upgrade', (request, socket, head) => {
     const url = new URL(request.url || '', `http://${request.headers.host}`);
     if (url.pathname === '/ws') {
@@ -393,7 +393,7 @@ server.on('upgrade', (request, socket, head) => {
     }
 });
 
-// WebSocket Connection Handling
+// Tratamento de conexões WebSocket.
 wss.on('connection', (ws: ExtendedWebSocket) => {
     const { roomId, clientId, token } = ws.data;
     const room = roomManager.getRoom(roomId);
@@ -420,7 +420,7 @@ wss.on('connection', (ws: ExtendedWebSocket) => {
         roomManager.updateHostHeartbeat(roomId);
     }
 
-    // Initial state send
+    // Envia estado inicial para restaurar a UI ao conectar.
     if (room) {
         const currentTime = roomManager.getCurrentTime(roomId);
         ws.send(JSON.stringify({
@@ -430,14 +430,14 @@ wss.on('connection', (ws: ExtendedWebSocket) => {
             isHost,
         }));
 
-        if (room.state.isUploading && isHost) {
+        if (room.state.isUploading) {
             ws.send(JSON.stringify({
                 type: "upload-progress",
                 progress: room.state.uploadProgress,
             }));
         }
 
-        if (room.state.isProcessing && isHost) {
+        if (room.state.isProcessing) {
              ws.send(JSON.stringify({
                 type: "processing-progress",
                 processingMessage: room.state.processingMessage
@@ -491,7 +491,7 @@ setInterval(() => {
     roomManager.forEachRoom(room => {
         if (room.clients.size === 0) return;
         
-        // Dynamic Sync Rate Check
+        // Ajusta frequência de sync conforme estado da sala.
         const lastSync = roomLastSync.get(room.id) || 0;
         const interval = roomManager.getSyncInterval(room.id);
         
@@ -499,17 +499,17 @@ setInterval(() => {
 
         if (!room.state.playbackStarted) return;
         
-        // Update sync timestamp
+        // Atualiza referência do último sync enviado.
         roomLastSync.set(room.id, serverTime);
 
-        // Only sync if playing, or if it's been a long time (keep alive state)
+        // Sincroniza continuamente em reprodução e periodicamente para manter estado ativo.
         if (room.state.isPlaying || (serverTime - lastSync > 5000)) {
             const currentTime = roomManager.getCurrentTime(room.id);
             roomManager.broadcastAll(room.id, {
                 type: "sync",
                 currentTime,
                 isPlaying: room.state.isPlaying,
-                serverTime // Backend adds serverTime for latency compensation
+                serverTime // Inclui tempo do servidor para compensação de latência.
             });
         }
     });

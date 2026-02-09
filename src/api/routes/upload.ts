@@ -19,19 +19,19 @@ const activeUploadsByRoom = new Map<string, string>();
 const UPLOAD_TTL_MS = 30 * 60 * 1000;
 const CLEANUP_INTERVAL = 5 * 60 * 1000;
 
-// Cache for open file handles: uploadId -> { handle, lastUsed }
+// Cache de handles de arquivo abertos: uploadId -> { handle, lastUsed }
 const fileHandleCache = new Map<string, { handle: fs.FileHandle, lastUsed: number }>();
-const HANDLE_TTL_MS = 60000; // Close handle after 60s of inactivity (increased for parallel uploads)
+const HANDLE_TTL_MS = 60000; // Fecha handle após 60s sem atividade.
 const activeWriteCounts = new Map<string, number>();
 
-// Metadata Cache - simplified for performance (no disk sync during upload)
+// Cache de metadados em memória para reduzir I/O durante o upload.
 const metaCache = new Map<string, UploadMeta>();
 const receivedChunkSets = new Map<string, Set<number>>();
 const metaLoadPromises = new Map<string, Promise<UploadMeta | null>>();
 const uploadDirsById = new Map<string, string>();
 
 // Progresso deve ser calculado pelo servidor a partir dos chunks recebidos.
-// Throttle para não inundar o WS em uploads rápidos.
+// Limita a frequência de broadcast para não inundar o WS em uploads rápidos.
 const progressBroadcastByRoom = new Map<string, { progress: number; lastSent: number }>();
 const PROGRESS_BROADCAST_THROTTLE_MS = 250;
 
@@ -95,11 +95,9 @@ async function getOrLoadMeta(chunksDir: string, uploadId: string): Promise<Uploa
   const pending = metaLoadPromises.get(uploadId);
   if (pending) return pending;
   
-  // 1. Try Cache first (fast path)
   const cached = metaCache.get(uploadId);
   if (cached) return cached;
 
-  // 2. Load from disk only if not in cache
   const loadPromise = (async () => {
     const meta = await readMetaAsync(chunksDir);
     if (meta) {
@@ -117,7 +115,7 @@ async function getOrLoadMeta(chunksDir: string, uploadId: string): Promise<Uploa
   }
 }
 
-// Sync metadata to disk - called only on init, complete, abort
+// Sincroniza metadados em disco somente em init, complete e abort.
 async function syncMetaToDisk(uploadId: string): Promise<void> {
   const meta = metaCache.get(uploadId);
   const chunksDir = uploadDirsById.get(uploadId);
@@ -137,11 +135,10 @@ function clearMetaCache(uploadId: string) {
   uploadDirsById.delete(uploadId);
 }
 
-// Check for idle handles periodically
+// Fecha handles ociosos periodicamente para evitar acúmulo de descritores.
 setInterval(async () => {
   const now = Date.now();
   for (const [uploadId, cached] of fileHandleCache.entries()) {
-    // Only close if no active writes and handle is idle
     const activeWrites = activeWriteCounts.get(uploadId) || 0;
     if (activeWrites === 0 && now - cached.lastUsed > HANDLE_TTL_MS) {
       await closeUploadHandle(uploadId);
@@ -208,10 +205,8 @@ async function cleanupUploads(uploadsDir: string) {
     const uploadId = entry.name;
     const dirPath = join(uploadsDir, uploadId);
     
-    // Check cache first for most recent activity
     let meta: UploadMeta | null = metaCache.get(uploadId) ?? null;
     
-    // If not in cache, try reading from disk
     if (!meta) {
         meta = readMeta(dirPath);
         if (meta) {
@@ -226,7 +221,6 @@ async function cleanupUploads(uploadsDir: string) {
       : now - statSync(dirPath).mtimeMs;
 
     if (age > UPLOAD_TTL_MS) {
-      // Ensure we clean up cache if we are deleting
       await closeUploadHandle(uploadId);
       clearMetaCache(uploadId);
       await removeUpload(dirPath);
@@ -262,11 +256,6 @@ export async function cleanupRoomUploads(uploadsDir: string, roomId: string) {
 
   const dirs = listRoomUploadDirs(uploadsDir, roomId);
   for (const dir of dirs) {
-    // Try to extract uploadId from dir name "roomId_timestamp" - not perfect but we can rely on TTL mostly.
-    // However, if we are force cleaning, we should try to close handles if they exist in cache
-    // Iterate cache to find matching roomId? Expensive.
-    // For now, relies on TTL or explicit activeUploadId.
-    // Better: Extract basename and try to close/clear.
     const dirName = basename(dir);
     if (dirName) {
          await closeUploadHandle(dirName);
@@ -380,6 +369,11 @@ export function createUploadRouter(deps: UploadDeps): Router {
     const authError = ensureUploadAuthorized(roomId, auth.token, auth.hostId, deps);
     if (authError) { res.status(authError.status).json({ error: authError.error }); return; }
 
+    if (room.state.isProcessing) {
+      res.status(409).json({ error: "Aguarde o processamento atual terminar antes de enviar outro vídeo" });
+      return;
+    }
+
     const { filename } = body;
     const totalChunks = Number(body.totalChunks) || 0;
     const chunkSize = Number(body.chunkSize) || 0;
@@ -416,7 +410,6 @@ export function createUploadRouter(deps: UploadDeps): Router {
       lastActivity: Date.now()
     };
 
-    // Initialize cache and write to disk
     metaCache.set(uploadId, meta);
     receivedChunkSets.set(uploadId, new Set());
     uploadDirsById.set(uploadId, chunksDir);
@@ -491,7 +484,6 @@ export function createUploadRouter(deps: UploadDeps): Router {
       return;
     }
 
-    // Decrement active write count
     const remaining = (activeWriteCounts.get(uploadId) || 1) - 1;
     if (remaining <= 0) {
       activeWriteCounts.delete(uploadId);
@@ -499,7 +491,6 @@ export function createUploadRouter(deps: UploadDeps): Router {
       activeWriteCounts.set(uploadId, remaining);
     }
 
-    // Update in-memory state only (no disk I/O)
     meta.lastActivity = Date.now();
     const receivedSet = receivedChunkSets.get(uploadId) || new Set<number>();
     receivedSet.add(chunkIndex);
@@ -547,7 +538,7 @@ export function createUploadRouter(deps: UploadDeps): Router {
     const finalPath = join(deps.uploadsDir, `${uploadId}_${safeFilename}`);
     const partPath = getPartPath(chunksDir);
     
-    // Close file handle and sync metadata before finalizing
+    // Garante consistência em disco antes de finalizar o arquivo.
     await closeUploadHandle(uploadId);
     await syncMetaToDisk(uploadId);
     clearMetaCache(uploadId);
@@ -559,19 +550,22 @@ export function createUploadRouter(deps: UploadDeps): Router {
       activeUploadsByRoom.delete(roomId);
     }
 
-    // Start Async Processing
-    // We send response immediately so client doesn't timeout, but we keep room in "Processing" state
+    // Responde imediatamente para evitar timeout do cliente e mantém a sala em processamento.
+    const initialProcessingMessage = "Iniciando pós-processamento...";
+
     deps.roomManager.updateState(roomId, { 
         isUploading: false, 
         uploadProgress: 100, 
         isProcessing: true, 
-        processingMessage: "Iniciando pós-processamento..." 
+        processingMessage: initialProcessingMessage 
+    });
+    deps.roomManager.broadcastAll(roomId, {
+      type: "processing-progress",
+      processingMessage: initialProcessingMessage
     });
     
-    // Send immediate response
     res.json({ success: true, filename: safeFilename, processing: true });
 
-    // Background Task
     (async () => {
         try {
             const processor = new MediaProcessor(deps.roomManager);
@@ -589,7 +583,6 @@ export function createUploadRouter(deps: UploadDeps): Router {
                 isProcessing: false, 
                 processingMessage: 'Erro no processamento' 
             });
-            // Optionally broadcast error
         }
     })();
   });
@@ -610,7 +603,7 @@ export function createUploadRouter(deps: UploadDeps): Router {
 
     const { uploadId } = body;
 
-    // Mantém compatibilidade: este endpoint serve para atualizar lastActivity/keep-alive,
+    // Mantém compatibilidade: este endpoint serve para atualizar lastActivity/sinal de atividade,
     // mas o progresso deve ser derivado dos chunks recebidos no servidor.
     const effectiveUploadId = uploadId || activeUploadsByRoom.get(roomId);
 

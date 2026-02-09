@@ -1,7 +1,7 @@
 import { dom } from './dom.js';
 import { state, constants } from './state.js';
 import { formatBytes, formatEta } from './utils.js';
-import { showUploadProgress, updateUploadProgress } from './ui.js';
+import { showUploadProgress, showProcessingProgress, updateUploadProgress } from './ui.js';
 
 function log(...args) {
     if (location.hostname === 'localhost') {
@@ -119,7 +119,6 @@ export async function uploadFile(file) {
         let completedBytes = 0;
         let completedChunks = existingChunks.length;
         
-        // Calculate initial completed bytes
         if (existingChunks.length) {
             completedBytes = existingChunks.reduce((acc, idx) => {
                 const start = idx * constants.CHUNK_SIZE;
@@ -130,8 +129,7 @@ export async function uploadFile(file) {
         }
 
         const startTimeGlobal = Date.now();
-        
-        // Queue of chunks to upload
+
         const chunkQueue = [];
         for (let i = 0; i < totalChunks; i++) {
             if (!existingSet.has(i)) {
@@ -140,7 +138,6 @@ export async function uploadFile(file) {
         }
         const totalToUpload = chunkQueue.length;
 
-        // Map to track progress of currently uploading chunks
         const activeProgress = new Map();
         let lastProgressUpdate = 0;
 
@@ -221,7 +218,6 @@ export async function uploadFile(file) {
             }
         };
 
-        // Worker function to process the queue
         const worker = async () => {
             while (chunkQueue.length > 0) {
                 const chunkIndex = chunkQueue.shift();
@@ -233,14 +229,11 @@ export async function uploadFile(file) {
             }
         };
 
-        // Start workers with configured concurrency
         const concurrency = Math.min(constants.UPLOAD_CONCURRENCY, chunkQueue.length);
-        
-        // Abort controller for page unload
+
         const abortController = new AbortController();
         const onUnload = () => {
              abortController.abort();
-             workers.forEach(() => {}); // No-op, just to reference
         };
         window.addEventListener('beforeunload', onUnload);
 
@@ -264,15 +257,14 @@ export async function uploadFile(file) {
         const completeData = await completeRes.json();
         
         if (completeData.processing) {
-             dom.uploadStatus.textContent = 'Processando vídeo... (Isso pode levar alguns minutos)';
-             // UI will be updated via WebSocket processing-progress events
+             showProcessingProgress('Processando vídeo... (Isso pode levar alguns minutos)');
         } else {
              clearStoredUpload();
         }
 
     } catch (err) {
         log('Erro:', err);
-        // If forbidden (session ended), clear storage to prevent resume loop
+        // Evita loop de retomada quando a sessão já foi encerrada.
         if (err.message && err.message.includes('403')) {
             clearStoredUpload();
             dom.uploadStatus.textContent = 'Upload cancelado (Sessão encerrada)';

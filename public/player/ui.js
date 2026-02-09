@@ -8,22 +8,45 @@ export function initSidebar() {
 }
 
 export function updateHostUI() {
+    const isTransitioning = state.roomStage === 'uploading' || state.roomStage === 'processing';
+
     if (state.isHost) {
         dom.btnEndSession.classList.remove('hidden');
-        if (!state.hasVideo) {
-            dom.uploadZone.classList.remove('hidden');
-            dom.waitingOverlay.classList.add('hidden');
+
+        if (state.hasVideo) return;
+
+        dom.waitingOverlay.classList.add('hidden');
+
+        if (state.roomStage === 'processing' || state.roomStage === 'uploading') {
+            dom.uploadZone.classList.add('hidden');
+            dom.uploadOverlayEl.classList.remove('hidden');
+            return;
         }
+
+        state.roomStage = 'idle';
+        dom.uploadOverlayEl.classList.add('hidden');
+        dom.uploadZone.classList.remove('hidden');
+        return;
     } else {
         dom.btnEndSession.classList.add('hidden');
-        if (!state.hasVideo) {
-            dom.uploadZone.classList.add('hidden');
-            dom.waitingOverlay.classList.remove('hidden');
+        if (state.hasVideo) return;
+
+        dom.uploadZone.classList.add('hidden');
+        dom.uploadOverlayEl.classList.add('hidden');
+        dom.waitingOverlay.classList.remove('hidden');
+
+        if (!isTransitioning) {
+            state.roomStage = 'idle';
+            const waitingTitle = dom.waitingOverlay.querySelector('h2');
+            const waitingMessage = dom.waitingOverlay.querySelector('p');
+            if (waitingTitle) waitingTitle.textContent = 'Aguardando o Host';
+            if (waitingMessage) waitingMessage.textContent = 'O dono da sala está selecionando o filme...';
         }
     }
 }
 
 export function showPlayer() {
+    state.roomStage = 'ready';
     dom.uploadZone.classList.add('hidden');
     dom.uploadOverlayEl.classList.add('hidden');
     dom.waitingOverlay.classList.add('hidden');
@@ -39,22 +62,60 @@ export function showPlayer() {
 }
 
 export function showUploadProgress(progress = 0) {
+    state.roomStage = 'uploading';
+
     if (!state.isHost) {
         dom.waitingOverlay.classList.remove('hidden');
         dom.uploadOverlayEl.classList.add('hidden');
         dom.uploadZone.classList.add('hidden');
+        dom.playerOverlay.classList.add('hidden');
+
+        const waitingTitle = dom.waitingOverlay.querySelector('h2');
+        const waitingMessage = dom.waitingOverlay.querySelector('p');
+        if (waitingTitle) waitingTitle.textContent = 'Aguardando Envío';
+        if (waitingMessage) waitingMessage.textContent = `O host está enviando o filme: ${Math.max(0, Math.round(progress))}%`;
         return;
     }
 
     dom.uploadZone.classList.add('hidden');
+    dom.waitingOverlay.classList.add('hidden');
     dom.uploadOverlayEl.classList.remove('hidden');
     dom.playerOverlay.classList.add('hidden');
     updateUploadProgress(progress);
 }
 
 export function updateUploadProgress(progress) {
-    dom.uploadProgressFill.style.width = `${progress}%`;
-    dom.uploadProgressText.textContent = `${progress}%`;
+    const safeProgress = Number.isFinite(progress)
+        ? Math.max(0, Math.min(100, Math.round(progress)))
+        : 0;
+    dom.uploadProgressFill.style.width = `${safeProgress}%`;
+    dom.uploadProgressText.textContent = `${safeProgress}%`;
+}
+
+export function showProcessingProgress(message = 'Processando vídeo...') {
+    state.roomStage = 'processing';
+
+    if (!state.isHost) {
+        dom.waitingOverlay.classList.remove('hidden');
+        dom.uploadOverlayEl.classList.add('hidden');
+        dom.uploadZone.classList.add('hidden');
+        dom.playerOverlay.classList.add('hidden');
+
+        const waitingTitle = dom.waitingOverlay.querySelector('h2');
+        const waitingMessage = dom.waitingOverlay.querySelector('p');
+        if (waitingTitle) waitingTitle.textContent = 'Processando';
+        if (waitingMessage) waitingMessage.textContent = message;
+        return;
+    }
+
+    dom.uploadZone.classList.add('hidden');
+    dom.waitingOverlay.classList.add('hidden');
+    dom.uploadOverlayEl.classList.remove('hidden');
+    dom.playerOverlay.classList.add('hidden');
+    updateUploadProgress(100);
+    if (dom.uploadStatus) {
+        dom.uploadStatus.textContent = message;
+    }
 }
 
 export function updatePlayPauseUI() {
@@ -190,6 +251,7 @@ export function handleSessionEnded() {
     dom.video.pause();
     dom.video.src = '';
     state.hasVideo = false;
+    state.roomStage = 'idle';
     dom.modalSessionEnded.classList.remove('hidden');
 }
 

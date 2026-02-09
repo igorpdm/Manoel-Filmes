@@ -4,6 +4,8 @@ import {
     initSidebar,
     updateHostUI,
     showPlayer,
+    showUploadProgress,
+    showProcessingProgress,
     updatePlayPauseUI,
     updateProgress,
     updateSyncStatus,
@@ -68,15 +70,22 @@ async function checkRoomStatus() {
 
         if (data.hasVideo) {
             showPlayer();
-        } else if (data.isUploading) {
-            if (!state.isHost) {
-                dom.waitingOverlay.classList.remove('hidden');
-                dom.uploadZone.classList.add('hidden');
-                dom.playerOverlay.classList.add('hidden');
-                dom.waitingOverlay.querySelector('h2').textContent = 'Aguardando Envío';
-                dom.waitingOverlay.querySelector('p').textContent = `O host está enviando o filme: ${data.uploadProgress || 0}%`;
-            }
+            return;
         }
+
+        if (data.isProcessing) {
+            const message = data.processingMessage || 'Processando vídeo...';
+            showProcessingProgress(message);
+            return;
+        }
+
+        if (data.isUploading) {
+            showUploadProgress(data.uploadProgress || 0);
+            return;
+        }
+
+        state.roomStage = 'idle';
+        updateHostUI();
     } catch (e) {
         log('Erro ao verificar status:', e);
     }

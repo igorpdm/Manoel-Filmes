@@ -26,6 +26,7 @@ export const state = {
     hideControlsTimer: null,
     isDragging: false,
     hasVideo: false,
+    roomStage: 'idle',
     pendingSync: null,
     videoReady: false,
     pendingPlayData: null,
