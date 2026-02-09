@@ -10,13 +10,27 @@ export interface SubtitleInfo {
     displayName: string;
 }
 
+export interface AudioTrackInfo {
+    streamIndex: number;
+    codec: string;
+    language: string;
+    title: string;
+    channels: number;
+    isDefault: boolean;
+    isCompatible: boolean;
+}
+
 export interface RoomState {
     videoPath: string;
+    pendingVideoPath: string;
     currentTime: number;
     isPlaying: boolean;
     lastUpdate: number;
     isUploading: boolean;
     uploadProgress: number;
+    isAwaitingAudioSelection: boolean;
+    audioTracks: AudioTrackInfo[];
+    selectedAudioStreamIndex: number | null;
     isProcessing: boolean;
     processingMessage?: string;
     hostId: string;
@@ -133,6 +147,7 @@ export type MessageType =
     | "upload-start"
     | "upload-progress"
     | "upload-complete"
+    | "audio-track-selection-required"
     | "processing-progress"
     | "video-ready"
     | "ping"
@@ -157,6 +172,7 @@ export interface WSMessage {
     viewers?: { discordId: string; username: string; ping?: number }[];
     progress?: number;
     processingMessage?: string;
+    audioTracks?: AudioTrackInfo[];
     filename?: string;
     timestamp?: number;
     serverTime?: number;

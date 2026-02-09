@@ -5,22 +5,52 @@ import { spawn } from "child_process";
 import { join, basename, extname, dirname, relative } from "path";
 import { logger } from "../../shared/logger";
 import type { RoomManager } from "../../core/room-manager";
+import type { AudioTrackInfo } from "../../shared/types";
+
+interface ProcessMediaOptions {
+    selectedAudioStreamIndex?: number;
+}
 
 export class MediaProcessor {
     private static BITMAP_CODECS = new Set([
         'hdmv_pgs_subtitle', 'dvd_subtitle', 'dvb_subtitle', 'xsub'
     ]);
+    private static COMPATIBLE_AUDIO_CODECS = new Set(['aac', 'mp3']);
 
     constructor(private roomManager: typeof RoomManager.prototype) {}
 
-    async processMedia(roomId: string, filePath: string): Promise<string> {
+    async processMedia(roomId: string, filePath: string, options: ProcessMediaOptions = {}): Promise<string> {
         // 1. Extrair Legendas
         await this.extractSubtitles(roomId, filePath);
 
         // 2. Verificar e Converter Áudio se necessário
-        const processedPath = await this.convertAudioIfNeeded(roomId, filePath);
+        const processedPath = await this.convertAudioIfNeeded(roomId, filePath, options.selectedAudioStreamIndex);
 
         return processedPath;
+    }
+
+    async listAudioTracks(filePath: string): Promise<AudioTrackInfo[]> {
+        try {
+            const metadata = await this.ffprobe(filePath);
+            return metadata.streams
+                .filter((stream) => stream.codec_type === 'audio' && typeof stream.index === 'number')
+                .map((stream) => {
+                    const codec = (stream.codec_name || 'unknown').toLowerCase();
+                    return {
+                        streamIndex: stream.index as number,
+                        codec,
+                        language: (stream.tags?.language || 'und').toLowerCase(),
+                        title: (stream.tags?.title || '').trim(),
+                        channels: typeof stream.channels === 'number' ? stream.channels : 0,
+                        isDefault: stream.disposition?.default === 1,
+                        isCompatible: MediaProcessor.COMPATIBLE_AUDIO_CODECS.has(codec),
+                    };
+                })
+                .sort((a, b) => a.streamIndex - b.streamIndex);
+        } catch (error) {
+            logger.error("MediaProcessor", "Erro ao listar faixas de áudio", error);
+            return [];
+        }
     }
 
     private sanitizeFilename(name: string): string {
@@ -129,28 +159,40 @@ export class MediaProcessor {
         }
     }
 
-    private async convertAudioIfNeeded(roomId: string, filePath: string): Promise<string> {
+    private async convertAudioIfNeeded(roomId: string, filePath: string, selectedAudioStreamIndex?: number): Promise<string> {
         this.notifyProgress(roomId, "Verificando codecs de áudio...");
 
         try {
             const metadata = await this.ffprobe(filePath);
-            const audioStreams = metadata.streams.filter(s => s.codec_type === 'audio');
+            const audioStreams = metadata.streams.filter(
+                (stream) => stream.codec_type === 'audio' && typeof stream.index === 'number'
+            );
 
             if (audioStreams.length === 0) {
                 return filePath; // Sem áudio, nada a fazer
             }
 
-            const needsConversion = audioStreams.some(s => {
-                const codec = s.codec_name?.toLowerCase();
-                return codec !== 'aac' && codec !== 'mp3';
-            });
+            const selectedStream = typeof selectedAudioStreamIndex === 'number'
+                ? audioStreams.find((stream) => stream.index === selectedAudioStreamIndex)
+                : undefined;
+            const targetStream = selectedStream || audioStreams[0];
+            const targetCodec = targetStream.codec_name?.toLowerCase() || 'unknown';
+            const needsConversion = !MediaProcessor.COMPATIBLE_AUDIO_CODECS.has(targetCodec);
+            const needsTrackSelection = typeof selectedAudioStreamIndex === 'number' && audioStreams.length > 1;
 
-            if (!needsConversion) {
+            if (!needsConversion && !needsTrackSelection) {
                 logger.info("MediaProcessor", "Áudio compatível. Nenhuma conversão necessária.");
                 return filePath;
             }
 
-            this.notifyProgress(roomId, "Convertendo áudio para AAC (Isso pode demorar)...");
+            const selectedTrackLabel = `stream ${targetStream.index}`;
+            logger.info("MediaProcessor", `Usando ${selectedTrackLabel} (${targetCodec})`);
+
+            if (needsConversion) {
+                this.notifyProgress(roomId, "Convertendo faixa de áudio selecionada para AAC (Isso pode demorar)...");
+            } else {
+                this.notifyProgress(roomId, "Aplicando faixa de áudio selecionada...");
+            }
 
             const dir = dirname(filePath);
             const ext = extname(filePath);
@@ -158,34 +200,44 @@ export class MediaProcessor {
             const tempPath = join(dir, `${name}_converted.mp4`); // Force MP4 container for web compatibility
 
             await new Promise<void>((resolve, reject) => {
-                ffmpeg(filePath)
+                const command = ffmpeg(filePath)
                     .output(tempPath)
+                    .outputOptions('-map 0:v:0')
+                    .outputOptions(`-map 0:${targetStream.index}`)
                     .videoCodec('copy') // Copy video stream (fast)
-                    .audioCodec('aac')  // Convert audio to AAC
-                    .audioChannels(2)   // Force Stereo
-                    .audioBitrate('192k')
                     .outputOptions('-movflags +faststart') // Optimize for web streaming
                     .outputOptions('-y') // Force overwrite
                     .on('start', (cmd) => {
                         logger.debug("MediaProcessor", `Comando FFmpeg Áudio: ${cmd}`);
                     })
                     .on('progress', (progress) => {
-                        // Simple progress estimation if possible, or just keep "Processing..."
-                        if (progress.percent) {
+                        if (needsConversion && progress.percent) {
                             this.notifyProgress(roomId, `Convertendo áudio: ${Math.round(progress.percent)}%`);
                         }
                     })
                     .on('end', () => resolve())
-                    .on('error', (err) => reject(err))
-                    .run();
+                    .on('error', (err) => reject(err));
+
+                if (needsConversion) {
+                    command.audioCodec('aac').audioChannels(2).audioBitrate('192k');
+                } else {
+                    command.audioCodec('copy');
+                }
+
+                command.run();
             });
 
             // Replace original file
-            await unlink(filePath);
+            if (existsSync(filePath)) {
+                await unlink(filePath);
+            }
             
             // Rename converted file to original name (but maybe change extension if it was MKV)
             // Ideally we keep the new extension if we changed container to MP4
             const finalPath = join(dir, `${name}.mp4`);
+            if (existsSync(finalPath)) {
+                await unlink(finalPath);
+            }
             await rename(tempPath, finalPath);
 
             return finalPath;
@@ -217,4 +269,3 @@ export class MediaProcessor {
         });
     }
 }
-

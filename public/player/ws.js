@@ -5,6 +5,7 @@ import {
     updateHostUI,
     showPlayer,
     showUploadProgress,
+    showAudioTrackSelection,
     showProcessingProgress,
     showRatingModal,
     showRatingsResults,
@@ -209,6 +210,9 @@ function handleMessage(data) {
             break;
         case 'upload-progress':
             showUploadProgress(data.progress || 0);
+            break;
+        case 'audio-track-selection-required':
+            showAudioTrackSelection(data.audioTracks || []);
             break;
         case 'processing-progress':
             const msg = data.processingMessage || 'Processando vídeo...';

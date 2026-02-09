@@ -34,6 +34,7 @@ export class RoomManager {
     private cleanupInterval: NodeJS.Timeout | null = null;
     private cleanupTimers = new Map<string, NodeJS.Timeout>();
     private viewerBroadcastTimeouts = new Map<string, NodeJS.Timeout>();
+    // TODO: quando abrir para vários servidores, trocar isso por sessão ativa por guild.
     private activeDiscordSession: string | null = null;
 
     constructor() {
@@ -60,6 +61,7 @@ export class RoomManager {
         discordSession: DiscordSession & { hostUsername?: string },
         selectedEpisode?: SelectedEpisode
     ): { roomId: string; hostToken: string } | null {
+        // TODO: por enquanto eu bloqueio novas salas se já tiver uma ativa.
         if (this.activeDiscordSession || this.rooms.size > 0) {
             return null;
         }
@@ -81,11 +83,15 @@ export class RoomManager {
             id: roomId,
             state: {
                 videoPath: '',
+                pendingVideoPath: '',
                 currentTime: 0,
                 isPlaying: false,
                 lastUpdate: Date.now(),
                 isUploading: false,
                 uploadProgress: 0,
+                isAwaitingAudioSelection: false,
+                audioTracks: [],
+                selectedAudioStreamIndex: null,
                 isProcessing: false,
                 processingMessage: '',
                 hostId,
@@ -235,11 +241,15 @@ export class RoomManager {
             id,
             state: {
                 videoPath: videoPath || '',
+                pendingVideoPath: '',
                 currentTime: 0,
                 isPlaying: false,
                 lastUpdate: Date.now(),
                 isUploading: false,
                 uploadProgress: 0,
+                isAwaitingAudioSelection: false,
+                audioTracks: [],
+                selectedAudioStreamIndex: null,
                 isProcessing: false,
                 processingMessage: '',
                 hostId,
@@ -378,6 +388,10 @@ export class RoomManager {
         const room = this.rooms.get(roomId);
         if (room) {
             room.state.videoPath = path;
+            room.state.pendingVideoPath = '';
+            room.state.isAwaitingAudioSelection = false;
+            room.state.audioTracks = [];
+            room.state.selectedAudioStreamIndex = null;
             room.state.currentTime = 0;
             room.state.isPlaying = false;
             room.state.lastUpdate = Date.now();
@@ -487,19 +501,24 @@ export class RoomManager {
         }
         room.clients.clear();
 
-        if (room.state.videoPath && existsSync(room.state.videoPath)) {
-            const resolvedVideoPath = resolve(room.state.videoPath);
-            const resolvedUploadsDir = resolve(UPLOADS_DIR);
+        const resolvedUploadsDir = resolve(UPLOADS_DIR);
+        const mediaPaths = [room.state.videoPath, room.state.pendingVideoPath].filter(Boolean);
+        const uniqueMediaPaths = Array.from(new Set(mediaPaths));
 
-            if (resolvedVideoPath.startsWith(resolvedUploadsDir)) {
-                try {
-                    logger.debug("RoomManager", `Deleting video file: ${room.state.videoPath}`);
-                    await rm(room.state.videoPath, { force: true });
-                } catch (e) {
-                    logger.error("RoomManager", "Error deleting video file", e);
-                }
-            } else {
-                logger.warn("RoomManager", `Skipping file deletion (external file): ${room.state.videoPath}`);
+        for (const mediaPath of uniqueMediaPaths) {
+            if (!existsSync(mediaPath)) continue;
+            const resolvedMediaPath = resolve(mediaPath);
+
+            if (!resolvedMediaPath.startsWith(resolvedUploadsDir)) {
+                logger.warn("RoomManager", `Skipping file deletion (external file): ${mediaPath}`);
+                continue;
+            }
+
+            try {
+                logger.debug("RoomManager", `Deleting media file: ${mediaPath}`);
+                await rm(mediaPath, { force: true });
+            } catch (e) {
+                logger.error("RoomManager", "Error deleting media file", e);
             }
         }
 

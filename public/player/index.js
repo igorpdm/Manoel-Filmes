@@ -5,6 +5,7 @@ import {
     updateHostUI,
     showPlayer,
     showUploadProgress,
+    showAudioTrackSelection,
     showProcessingProgress,
     updatePlayPauseUI,
     updateProgress,
@@ -76,6 +77,11 @@ async function checkRoomStatus() {
         if (data.isProcessing) {
             const message = data.processingMessage || 'Processando vídeo...';
             showProcessingProgress(message);
+            return;
+        }
+
+        if (data.isAwaitingAudioSelection) {
+            showAudioTrackSelection(data.audioTracks || []);
             return;
         }
 

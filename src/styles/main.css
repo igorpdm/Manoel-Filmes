@@ -235,6 +235,26 @@ body {
   @apply absolute top-0 left-0 w-full h-full bg-black/90 flex flex-col justify-center items-center z-[40];
 }
 
+.audio-track-form {
+  @apply mt-5 w-full max-w-[520px] px-6 py-5 rounded-xl border border-glass-border bg-black/35 flex flex-col gap-3;
+}
+
+.audio-track-form label {
+  @apply text-[0.9rem] text-text-secondary;
+}
+
+.audio-track-select {
+  @apply w-full;
+}
+
+.audio-track-note {
+  @apply text-[0.85rem] text-[#cbd5e1];
+}
+
+.audio-track-confirm {
+  @apply mt-2 max-w-[220px] self-center;
+}
+
 .spinner {
   @apply w-[50px] h-[50px] border-4 border-white/10 border-l-primary rounded-full animate-spin mb-4;
 }

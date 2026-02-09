@@ -7,8 +7,94 @@ export function initSidebar() {
     dom.btnCloseSidebar?.addEventListener('click', () => dom.usersSidebar?.classList.add('hidden'));
 }
 
+function setWaitingOverlayText(title, message) {
+    const waitingTitle = dom.waitingOverlay.querySelector('h2');
+    const waitingMessage = dom.waitingOverlay.querySelector('p');
+    if (waitingTitle) waitingTitle.textContent = title;
+    if (waitingMessage) waitingMessage.textContent = message;
+}
+
+function formatAudioTrackLabel(track, index) {
+    const language = track.language && track.language !== 'und'
+        ? track.language.toUpperCase()
+        : `Faixa ${index + 1}`;
+    const codec = track.codec ? track.codec.toUpperCase() : 'DESCONHECIDO';
+    const title = track.title ? ` - ${track.title}` : '';
+    const channels = track.channels > 0 ? ` • ${track.channels}ch` : '';
+    const defaultLabel = track.isDefault ? ' • padrão' : '';
+    return `${language}${title} • ${codec}${channels}${defaultLabel}`;
+}
+
+function updateAudioTrackNote() {
+    if (!dom.audioTrackSelect || !dom.audioTrackNote) return;
+
+    const selectedStreamIndex = Number(dom.audioTrackSelect.value);
+    const selectedTrack = state.audioTracks.find((track) => track.streamIndex === selectedStreamIndex);
+
+    if (!selectedTrack) {
+        dom.audioTrackNote.textContent = '';
+        return;
+    }
+
+    if (selectedTrack.isCompatible) {
+        dom.audioTrackNote.textContent = 'Essa faixa é compatível e será usada diretamente.';
+    } else {
+        dom.audioTrackNote.textContent = 'Essa faixa será convertida para AAC antes da reprodução.';
+    }
+}
+
+export function showAudioTrackSelection(audioTracks = []) {
+    if (Array.isArray(audioTracks) && audioTracks.length > 0) {
+        state.audioTracks = audioTracks;
+    }
+
+    state.roomStage = 'audio-selection';
+    state.hasVideo = false;
+
+    if (!state.isHost) {
+        dom.waitingOverlay.classList.remove('hidden');
+        dom.uploadOverlayEl.classList.add('hidden');
+        dom.uploadZone.classList.add('hidden');
+        dom.audioTrackOverlay.classList.add('hidden');
+        dom.playerOverlay.classList.add('hidden');
+        setWaitingOverlayText('Aguardando seleção de áudio', 'O host está escolhendo a faixa de áudio...');
+        return;
+    }
+
+    dom.uploadZone.classList.add('hidden');
+    dom.waitingOverlay.classList.add('hidden');
+    dom.uploadOverlayEl.classList.add('hidden');
+    dom.playerOverlay.classList.add('hidden');
+    dom.audioTrackOverlay.classList.remove('hidden');
+
+    if (dom.audioTrackError) {
+        dom.audioTrackError.textContent = '';
+        dom.audioTrackError.classList.add('hidden');
+    }
+
+    if (!dom.audioTrackSelect) return;
+
+    dom.audioTrackSelect.innerHTML = '';
+    state.audioTracks.forEach((track, index) => {
+        const option = document.createElement('option');
+        option.value = String(track.streamIndex);
+        option.textContent = formatAudioTrackLabel(track, index);
+        dom.audioTrackSelect.appendChild(option);
+    });
+
+    const defaultTrack = state.audioTracks.find((track) => track.isDefault) || state.audioTracks[0];
+    if (defaultTrack) {
+        dom.audioTrackSelect.value = String(defaultTrack.streamIndex);
+    }
+
+    dom.audioTrackSelect.onchange = () => updateAudioTrackNote();
+    updateAudioTrackNote();
+}
+
 export function updateHostUI() {
-    const isTransitioning = state.roomStage === 'uploading' || state.roomStage === 'processing';
+    const isTransitioning = state.roomStage === 'uploading'
+        || state.roomStage === 'processing'
+        || state.roomStage === 'audio-selection';
 
     if (state.isHost) {
         dom.btnEndSession.classList.remove('hidden');
@@ -16,15 +102,23 @@ export function updateHostUI() {
         if (state.hasVideo) return;
 
         dom.waitingOverlay.classList.add('hidden');
+        dom.playerOverlay.classList.add('hidden');
+
+        if (state.roomStage === 'audio-selection') {
+            showAudioTrackSelection(state.audioTracks);
+            return;
+        }
 
         if (state.roomStage === 'processing' || state.roomStage === 'uploading') {
             dom.uploadZone.classList.add('hidden');
             dom.uploadOverlayEl.classList.remove('hidden');
+            dom.audioTrackOverlay.classList.add('hidden');
             return;
         }
 
         state.roomStage = 'idle';
         dom.uploadOverlayEl.classList.add('hidden');
+        dom.audioTrackOverlay.classList.add('hidden');
         dom.uploadZone.classList.remove('hidden');
         return;
     } else {
@@ -33,22 +127,28 @@ export function updateHostUI() {
 
         dom.uploadZone.classList.add('hidden');
         dom.uploadOverlayEl.classList.add('hidden');
+        dom.audioTrackOverlay.classList.add('hidden');
         dom.waitingOverlay.classList.remove('hidden');
+
+        if (state.roomStage === 'audio-selection') {
+            setWaitingOverlayText('Aguardando seleção de áudio', 'O host está escolhendo a faixa de áudio...');
+            return;
+        }
 
         if (!isTransitioning) {
             state.roomStage = 'idle';
-            const waitingTitle = dom.waitingOverlay.querySelector('h2');
-            const waitingMessage = dom.waitingOverlay.querySelector('p');
-            if (waitingTitle) waitingTitle.textContent = 'Aguardando o Host';
-            if (waitingMessage) waitingMessage.textContent = 'O dono da sala está selecionando o filme...';
+            setWaitingOverlayText('Aguardando o Host', 'O dono da sala está selecionando o filme...');
         }
     }
 }
 
 export function showPlayer() {
     state.roomStage = 'ready';
+    state.audioTracks = [];
+    state.selectedAudioStreamIndex = null;
     dom.uploadZone.classList.add('hidden');
     dom.uploadOverlayEl.classList.add('hidden');
+    dom.audioTrackOverlay.classList.add('hidden');
     dom.waitingOverlay.classList.add('hidden');
     state.hasVideo = true;
 
@@ -68,17 +168,16 @@ export function showUploadProgress(progress = 0) {
         dom.waitingOverlay.classList.remove('hidden');
         dom.uploadOverlayEl.classList.add('hidden');
         dom.uploadZone.classList.add('hidden');
+        dom.audioTrackOverlay.classList.add('hidden');
         dom.playerOverlay.classList.add('hidden');
 
-        const waitingTitle = dom.waitingOverlay.querySelector('h2');
-        const waitingMessage = dom.waitingOverlay.querySelector('p');
-        if (waitingTitle) waitingTitle.textContent = 'Aguardando Envío';
-        if (waitingMessage) waitingMessage.textContent = `O host está enviando o filme: ${Math.max(0, Math.round(progress))}%`;
+        setWaitingOverlayText('Aguardando envio', `O host está enviando o filme: ${Math.max(0, Math.round(progress))}%`);
         return;
     }
 
     dom.uploadZone.classList.add('hidden');
     dom.waitingOverlay.classList.add('hidden');
+    dom.audioTrackOverlay.classList.add('hidden');
     dom.uploadOverlayEl.classList.remove('hidden');
     dom.playerOverlay.classList.add('hidden');
     updateUploadProgress(progress);
@@ -99,17 +198,16 @@ export function showProcessingProgress(message = 'Processando vídeo...') {
         dom.waitingOverlay.classList.remove('hidden');
         dom.uploadOverlayEl.classList.add('hidden');
         dom.uploadZone.classList.add('hidden');
+        dom.audioTrackOverlay.classList.add('hidden');
         dom.playerOverlay.classList.add('hidden');
 
-        const waitingTitle = dom.waitingOverlay.querySelector('h2');
-        const waitingMessage = dom.waitingOverlay.querySelector('p');
-        if (waitingTitle) waitingTitle.textContent = 'Processando';
-        if (waitingMessage) waitingMessage.textContent = message;
+        setWaitingOverlayText('Processando', message);
         return;
     }
 
     dom.uploadZone.classList.add('hidden');
     dom.waitingOverlay.classList.add('hidden');
+    dom.audioTrackOverlay.classList.add('hidden');
     dom.uploadOverlayEl.classList.remove('hidden');
     dom.playerOverlay.classList.add('hidden');
     updateUploadProgress(100);
@@ -252,6 +350,8 @@ export function handleSessionEnded() {
     dom.video.src = '';
     state.hasVideo = false;
     state.roomStage = 'idle';
+    state.audioTracks = [];
+    dom.audioTrackOverlay.classList.add('hidden');
     dom.modalSessionEnded.classList.remove('hidden');
 }
 

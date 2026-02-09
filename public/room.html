@@ -119,6 +119,20 @@
                     </div>
                 </div>
 
+                <div id="audio-track-overlay" class="overlay-screen hidden">
+                    <h2>Escolha a Faixa de Áudio</h2>
+                    <p id="audio-track-description">Selecione o idioma que será usado na sessão.</p>
+                    <div class="audio-track-form">
+                        <label for="audio-track-select">Faixas disponíveis</label>
+                        <select id="audio-track-select" class="custom-select audio-track-select"></select>
+                        <p id="audio-track-note" class="audio-track-note"></p>
+                        <button id="btn-confirm-audio-track" class="btn-primary audio-track-confirm" type="button">
+                            Confirmar faixa
+                        </button>
+                        <p id="audio-track-error" class="error hidden"></p>
+                    </div>
+                </div>
+
                 <div id="player-overlay" class="overlay-screen hidden" style="background: rgba(0,0,0,0.5);">
                     <div id="sync-indicator" class="sync-indicator">
                         <div class="spinner small"></div>

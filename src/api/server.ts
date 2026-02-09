@@ -276,6 +276,8 @@ app.get("/api/room-status/:roomId", (req, res) => {
         hasVideo: room.state.videoPath !== '',
         isUploading: room.state.isUploading,
         uploadProgress: room.state.uploadProgress,
+        isAwaitingAudioSelection: room.state.isAwaitingAudioSelection,
+        audioTracks: room.state.audioTracks,
         isProcessing: room.state.isProcessing,
         processingMessage: room.state.processingMessage
     });
@@ -434,6 +436,13 @@ wss.on('connection', (ws: ExtendedWebSocket) => {
             ws.send(JSON.stringify({
                 type: "upload-progress",
                 progress: room.state.uploadProgress,
+            }));
+        }
+
+        if (room.state.isAwaitingAudioSelection) {
+            ws.send(JSON.stringify({
+                type: "audio-track-selection-required",
+                audioTracks: room.state.audioTracks,
             }));
         }
 

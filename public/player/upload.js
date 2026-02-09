@@ -1,7 +1,7 @@
 import { dom } from './dom.js';
 import { state, constants } from './state.js';
 import { formatBytes, formatEta } from './utils.js';
-import { showUploadProgress, showProcessingProgress, updateUploadProgress } from './ui.js';
+import { showUploadProgress, showAudioTrackSelection, showProcessingProgress, updateUploadProgress } from './ui.js';
 
 function log(...args) {
     if (location.hostname === 'localhost') {
@@ -67,6 +67,55 @@ async function abortUpload(uploadId) {
         });
     } catch {
         return;
+    }
+}
+
+async function confirmAudioTrackSelection() {
+    if (!state.isHost || !dom.audioTrackSelect) return;
+
+    const streamIndex = Number(dom.audioTrackSelect.value);
+    if (!Number.isInteger(streamIndex)) {
+        if (dom.audioTrackError) {
+            dom.audioTrackError.textContent = 'Selecione uma faixa de áudio válida.';
+            dom.audioTrackError.classList.remove('hidden');
+        }
+        return;
+    }
+
+    if (dom.audioTrackError) {
+        dom.audioTrackError.textContent = '';
+        dom.audioTrackError.classList.add('hidden');
+    }
+
+    if (dom.btnConfirmAudioTrack) {
+        dom.btnConfirmAudioTrack.disabled = true;
+        dom.btnConfirmAudioTrack.textContent = 'Processando...';
+    }
+
+    try {
+        const response = await fetch(`/api/upload/audio-track/${state.roomId}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...buildAuthHeaders() },
+            body: JSON.stringify({ streamIndex })
+        });
+
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            throw new Error(data.error || 'Erro ao confirmar faixa de áudio');
+        }
+
+        state.selectedAudioStreamIndex = streamIndex;
+        showProcessingProgress('Processando vídeo... (Isso pode levar alguns minutos)');
+    } catch (error) {
+        if (dom.audioTrackError) {
+            dom.audioTrackError.textContent = error?.message || 'Erro ao confirmar faixa de áudio';
+            dom.audioTrackError.classList.remove('hidden');
+        }
+    } finally {
+        if (dom.btnConfirmAudioTrack) {
+            dom.btnConfirmAudioTrack.disabled = false;
+            dom.btnConfirmAudioTrack.textContent = 'Confirmar faixa';
+        }
     }
 }
 
@@ -254,18 +303,24 @@ export async function uploadFile(file) {
             body: JSON.stringify({ filename: file.name, totalChunks })
         });
         
-        const completeData = await completeRes.json();
-        
-        if (completeData.processing) {
-             showProcessingProgress('Processando vídeo... (Isso pode levar alguns minutos)');
-        } else {
-             clearStoredUpload();
+        const completeData = await completeRes.json().catch(() => ({}));
+        if (!completeRes.ok) {
+            throw new Error(completeData.error || 'Erro ao finalizar upload');
+        }
+
+        clearStoredUpload();
+
+        if (completeData.requiresAudioSelection) {
+            showAudioTrackSelection(completeData.audioTracks || []);
+        } else if (completeData.processing) {
+            showProcessingProgress('Processando vídeo... (Isso pode levar alguns minutos)');
         }
 
     } catch (err) {
         log('Erro:', err);
         // Evita loop de retomada quando a sessão já foi encerrada.
-        if (err.message && err.message.includes('403')) {
+        const message = err?.message || '';
+        if (message.includes('403')) {
             clearStoredUpload();
             dom.uploadStatus.textContent = 'Upload cancelado (Sessão encerrada)';
             return;
@@ -325,6 +380,8 @@ async function uploadPendingSubtitles() {
 }
 
 export function bindUploadEvents() {
+    dom.btnConfirmAudioTrack?.addEventListener('click', confirmAudioTrackSelection);
+
     dom.btnSelectFile?.addEventListener('click', () => dom.fileInput.click());
     dom.fileInput?.addEventListener('change', async (e) => {
         const file = e.target.files[0];

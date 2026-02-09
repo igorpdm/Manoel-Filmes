@@ -282,6 +282,78 @@ export async function cleanupRoomUploads(uploadsDir: string, roomId: string) {
  */
 export function createUploadRouter(deps: UploadDeps): Router {
   const router = Router();
+  const initialProcessingMessage = "Iniciando pós-processamento...";
+
+  const processRoomMedia = async (
+    roomId: string,
+    filePath: string,
+    selectedAudioStreamIndex?: number
+  ) => {
+    try {
+      const processor = new MediaProcessor(deps.roomManager);
+      const processedPath = await processor.processMedia(roomId, filePath, { selectedAudioStreamIndex });
+
+      deps.roomManager.setVideoPath(roomId, processedPath);
+      deps.roomManager.updateState(roomId, {
+        isProcessing: false,
+        processingMessage: '',
+        pendingVideoPath: '',
+        isAwaitingAudioSelection: false,
+        audioTracks: [],
+        selectedAudioStreamIndex: null,
+      });
+      deps.roomManager.broadcastAll(roomId, { type: "video-ready" });
+    } catch (err) {
+      logger.error("UploadRoute", `Falha ao processar mídia da sala ${roomId}`, err);
+
+      if (existsSync(filePath)) {
+        try {
+          await rm(filePath, { force: true });
+        } catch (removeError) {
+          logger.error("UploadRoute", `Falha ao remover arquivo após erro de processamento ${filePath}`, removeError);
+        }
+      }
+
+      deps.roomManager.updateState(roomId, {
+        isProcessing: false,
+        processingMessage: 'Erro no processamento',
+        pendingVideoPath: '',
+        isAwaitingAudioSelection: false,
+        audioTracks: [],
+        selectedAudioStreamIndex: null,
+      });
+      deps.roomManager.broadcastAll(roomId, {
+        type: "processing-progress",
+        processingMessage: "Erro no processamento do vídeo",
+      });
+    }
+  };
+
+  const startRoomProcessing = (
+    roomId: string,
+    filePath: string,
+    selectedAudioStreamIndex?: number
+  ) => {
+    deps.roomManager.updateState(roomId, {
+      isUploading: false,
+      uploadProgress: 100,
+      isAwaitingAudioSelection: false,
+      audioTracks: [],
+      selectedAudioStreamIndex: selectedAudioStreamIndex ?? null,
+      pendingVideoPath: filePath,
+      isProcessing: true,
+      processingMessage: initialProcessingMessage,
+    });
+
+    deps.roomManager.broadcastAll(roomId, {
+      type: "processing-progress",
+      processingMessage: initialProcessingMessage,
+    });
+
+    processRoomMedia(roomId, filePath, selectedAudioStreamIndex).catch((error) => {
+      logger.error("UploadRoute", `Falha inesperada no fluxo de processamento da sala ${roomId}`, error);
+    });
+  };
 
   router.get("/status/:roomId/:uploadId", async (req, res) => {
     const { roomId, uploadId } = req.params;
@@ -369,8 +441,8 @@ export function createUploadRouter(deps: UploadDeps): Router {
     const authError = ensureUploadAuthorized(roomId, auth.token, auth.hostId, deps);
     if (authError) { res.status(authError.status).json({ error: authError.error }); return; }
 
-    if (room.state.isProcessing) {
-      res.status(409).json({ error: "Aguarde o processamento atual terminar antes de enviar outro vídeo" });
+    if (room.state.isProcessing || room.state.isAwaitingAudioSelection) {
+      res.status(409).json({ error: "Aguarde a seleção e o processamento do áudio antes de enviar outro vídeo" });
       return;
     }
 
@@ -423,7 +495,15 @@ export function createUploadRouter(deps: UploadDeps): Router {
     }
     await fileHandle.close();
 
-    deps.roomManager.updateState(roomId, { isUploading: true, uploadProgress: 0 });
+    deps.roomManager.updateState(roomId, {
+      isUploading: true,
+      uploadProgress: 0,
+      isAwaitingAudioSelection: false,
+      audioTracks: [],
+      selectedAudioStreamIndex: null,
+      pendingVideoPath: '',
+      processingMessage: '',
+    });
     deps.roomManager.broadcastAll(roomId, { type: "upload-start", filename });
 
     res.json({ uploadId, safeFilename, chunksDir });
@@ -550,41 +630,81 @@ export function createUploadRouter(deps: UploadDeps): Router {
       activeUploadsByRoom.delete(roomId);
     }
 
-    // Responde imediatamente para evitar timeout do cliente e mantém a sala em processamento.
-    const initialProcessingMessage = "Iniciando pós-processamento...";
+    const processor = new MediaProcessor(deps.roomManager);
+    const audioTracks = await processor.listAudioTracks(finalPath);
 
-    deps.roomManager.updateState(roomId, { 
-        isUploading: false, 
-        uploadProgress: 100, 
-        isProcessing: true, 
-        processingMessage: initialProcessingMessage 
-    });
-    deps.roomManager.broadcastAll(roomId, {
-      type: "processing-progress",
-      processingMessage: initialProcessingMessage
-    });
-    
+    if (audioTracks.length > 1) {
+      deps.roomManager.updateState(roomId, {
+        isUploading: false,
+        uploadProgress: 100,
+        isAwaitingAudioSelection: true,
+        audioTracks,
+        selectedAudioStreamIndex: null,
+        pendingVideoPath: finalPath,
+        isProcessing: false,
+        processingMessage: '',
+      });
+
+      deps.roomManager.broadcastAll(roomId, {
+        type: "audio-track-selection-required",
+        audioTracks,
+      });
+
+      res.json({
+        success: true,
+        filename: safeFilename,
+        requiresAudioSelection: true,
+        audioTracks,
+      });
+      return;
+    }
+
+    const selectedAudioStreamIndex = audioTracks.length === 1 ? audioTracks[0].streamIndex : undefined;
+    startRoomProcessing(roomId, finalPath, selectedAudioStreamIndex);
     res.json({ success: true, filename: safeFilename, processing: true });
+  });
 
-    (async () => {
-        try {
-            const processor = new MediaProcessor(deps.roomManager);
-            const processedPath = await processor.processMedia(roomId, finalPath);
-            
-            deps.roomManager.setVideoPath(roomId, processedPath);
-            deps.roomManager.updateState(roomId, { 
-                isProcessing: false, 
-                processingMessage: '' 
-            });
-            deps.roomManager.broadcastAll(roomId, { type: "video-ready" });
-        } catch (err) {
-            logger.error("UploadRoute", `Falha ao processar mídia da sala ${roomId}`, err);
-            deps.roomManager.updateState(roomId, { 
-                isProcessing: false, 
-                processingMessage: 'Erro no processamento' 
-            });
-        }
-    })();
+  router.post("/audio-track/:roomId", async (req, res) => {
+    const { roomId } = req.params;
+    const room = deps.roomManager.getRoom(roomId);
+    if (!room) {
+      res.status(404).json({ error: "Sala não encontrada" });
+      return;
+    }
+
+    const auth = getAuthFromRequest(req, req.body);
+    const authError = ensureUploadAuthorized(roomId, auth.token, auth.hostId, deps);
+    if (authError) { res.status(authError.status).json({ error: authError.error }); return; }
+
+    if (room.state.isProcessing) {
+      res.status(409).json({ error: "A sala já está em processamento" });
+      return;
+    }
+
+    if (!room.state.isAwaitingAudioSelection) {
+      res.status(409).json({ error: "Não há seleção de faixa de áudio pendente" });
+      return;
+    }
+
+    const streamIndex = Number(req.body?.streamIndex);
+    if (!Number.isInteger(streamIndex)) {
+      res.status(400).json({ error: "Faixa de áudio inválida" });
+      return;
+    }
+
+    const selectedTrack = room.state.audioTracks.find((track) => track.streamIndex === streamIndex);
+    if (!selectedTrack) {
+      res.status(400).json({ error: "Faixa de áudio não encontrada" });
+      return;
+    }
+
+    if (!room.state.pendingVideoPath) {
+      res.status(400).json({ error: "Arquivo pendente não encontrado" });
+      return;
+    }
+
+    startRoomProcessing(roomId, room.state.pendingVideoPath, streamIndex);
+    res.json({ success: true, processing: true });
   });
 
   router.post("/progress/:roomId", async (req, res) => {

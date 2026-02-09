@@ -735,6 +735,40 @@ body {
     background-color: color-mix(in oklab, var(--color-black) 90%, transparent);
   }
 }
+.audio-track-form {
+  margin-top: calc(var(--spacing) * 5);
+  display: flex;
+  width: 100%;
+  max-width: 520px;
+  flex-direction: column;
+  gap: calc(var(--spacing) * 3);
+  border-radius: var(--radius-xl);
+  border-style: var(--tw-border-style);
+  border-width: 1px;
+  border-color: var(--color-glass-border);
+  background-color: color-mix(in srgb, #000 35%, transparent);
+  @supports (color: color-mix(in lab, red, red)) {
+    background-color: color-mix(in oklab, var(--color-black) 35%, transparent);
+  }
+  padding-inline: calc(var(--spacing) * 6);
+  padding-block: calc(var(--spacing) * 5);
+}
+.audio-track-form label {
+  font-size: 0.9rem;
+  color: var(--color-text-secondary);
+}
+.audio-track-select {
+  width: 100%;
+}
+.audio-track-note {
+  font-size: 0.85rem;
+  color: #cbd5e1;
+}
+.audio-track-confirm {
+  margin-top: calc(var(--spacing) * 2);
+  max-width: 220px;
+  align-self: center;
+}
 .spinner {
   margin-bottom: calc(var(--spacing) * 4);
   height: 50px;

@@ -27,6 +27,8 @@ export const state = {
     isDragging: false,
     hasVideo: false,
     roomStage: 'idle',
+    audioTracks: [],
+    selectedAudioStreamIndex: null,
     pendingSync: null,
     videoReady: false,
     pendingPlayData: null,
