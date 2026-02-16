@@ -11,6 +11,7 @@ export const dom = {
     audioTrackNote: document.getElementById('audio-track-note'),
     audioTrackError: document.getElementById('audio-track-error'),
     btnConfirmAudioTrack: document.getElementById('btn-confirm-audio-track'),
+    btnCancelPendingFile: document.getElementById('btn-cancel-pending-file'),
     uploadProgressFill: document.getElementById('upload-progress-fill'),
     uploadProgressText: document.getElementById('upload-progress-text'),
     uploadStatus: document.getElementById('upload-status'),

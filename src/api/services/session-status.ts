@@ -1,5 +1,5 @@
 import type { RoomManager } from "../../core/room-manager";
-import type { SessionRating } from "../../shared/types";
+import type { MovieInfo, SessionRating } from "../../shared/types";
 
 interface SessionViewer {
   discordId: string;
@@ -13,7 +13,7 @@ export interface SessionStatusData {
   ratings: SessionRating[];
   average: number;
   allRated: boolean;
-  movieInfo: unknown | null;
+  movieInfo: MovieInfo | null;
   movieName: string;
 }
 

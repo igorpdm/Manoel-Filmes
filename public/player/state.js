@@ -29,6 +29,7 @@ export const state = {
     roomStage: 'idle',
     audioTracks: [],
     selectedAudioStreamIndex: null,
+    audioSelectionErrorMessage: '',
     pendingSync: null,
     videoReady: false,
     pendingPlayData: null,

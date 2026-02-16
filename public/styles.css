@@ -764,10 +764,19 @@ body {
   font-size: 0.85rem;
   color: #cbd5e1;
 }
-.audio-track-confirm {
+.audio-track-actions {
   margin-top: calc(var(--spacing) * 2);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: calc(var(--spacing) * 3);
+}
+.audio-track-confirm, .audio-track-cancel {
+  margin: calc(var(--spacing) * 0);
+  width: auto;
   max-width: 220px;
-  align-self: center;
+  padding-inline: calc(var(--spacing) * 6);
 }
 .spinner {
   margin-bottom: calc(var(--spacing) * 4);

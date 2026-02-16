@@ -278,6 +278,7 @@ app.get("/api/room-status/:roomId", (req, res) => {
         uploadProgress: room.state.uploadProgress,
         isAwaitingAudioSelection: room.state.isAwaitingAudioSelection,
         audioTracks: room.state.audioTracks,
+        audioSelectionErrorMessage: room.state.audioSelectionErrorMessage || '',
         isProcessing: room.state.isProcessing,
         processingMessage: room.state.processingMessage
     });
@@ -443,6 +444,7 @@ wss.on('connection', (ws: ExtendedWebSocket) => {
             ws.send(JSON.stringify({
                 type: "audio-track-selection-required",
                 audioTracks: room.state.audioTracks,
+                errorMessage: room.state.audioSelectionErrorMessage || '',
             }));
         }
 

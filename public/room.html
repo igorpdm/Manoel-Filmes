@@ -126,9 +126,14 @@
                         <label for="audio-track-select">Faixas disponíveis</label>
                         <select id="audio-track-select" class="custom-select audio-track-select"></select>
                         <p id="audio-track-note" class="audio-track-note"></p>
-                        <button id="btn-confirm-audio-track" class="btn-primary audio-track-confirm" type="button">
-                            Confirmar faixa
-                        </button>
+                        <div class="audio-track-actions">
+                            <button id="btn-confirm-audio-track" class="btn-primary audio-track-confirm" type="button">
+                                Confirmar faixa
+                            </button>
+                            <button id="btn-cancel-pending-file" class="btn-secondary audio-track-cancel" type="button">
+                                Cancelar arquivo
+                            </button>
+                        </div>
                         <p id="audio-track-error" class="error hidden"></p>
                     </div>
                 </div>

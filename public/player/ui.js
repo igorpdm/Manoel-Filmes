@@ -43,9 +43,13 @@ function updateAudioTrackNote() {
     }
 }
 
-export function showAudioTrackSelection(audioTracks = []) {
+export function showAudioTrackSelection(audioTracks = [], errorMessage) {
     if (Array.isArray(audioTracks) && audioTracks.length > 0) {
         state.audioTracks = audioTracks;
+    }
+
+    if (typeof errorMessage === 'string') {
+        state.audioSelectionErrorMessage = errorMessage;
     }
 
     state.roomStage = 'audio-selection';
@@ -68,8 +72,14 @@ export function showAudioTrackSelection(audioTracks = []) {
     dom.audioTrackOverlay.classList.remove('hidden');
 
     if (dom.audioTrackError) {
-        dom.audioTrackError.textContent = '';
-        dom.audioTrackError.classList.add('hidden');
+        const message = state.audioSelectionErrorMessage?.trim();
+        if (message) {
+            dom.audioTrackError.textContent = message;
+            dom.audioTrackError.classList.remove('hidden');
+        } else {
+            dom.audioTrackError.textContent = '';
+            dom.audioTrackError.classList.add('hidden');
+        }
     }
 
     if (!dom.audioTrackSelect) return;
@@ -105,7 +115,7 @@ export function updateHostUI() {
         dom.playerOverlay.classList.add('hidden');
 
         if (state.roomStage === 'audio-selection') {
-            showAudioTrackSelection(state.audioTracks);
+            showAudioTrackSelection(state.audioTracks, state.audioSelectionErrorMessage);
             return;
         }
 

@@ -1,11 +1,12 @@
 import { Router } from "express";
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, promises as fs } from "fs";
 import { rm } from "fs/promises";
-import { join, basename } from "path";
+import { join, basename, resolve } from "path";
 import type { Request, Response } from "express";
-import { MediaProcessor } from "../services/media-processor";
+import { MediaProcessor, AudioTrackConversionError } from "../services/media-processor";
 import { logger } from "../../shared/logger";
 import type { UploadDeps, UploadMeta } from "./upload-types";
+import type { AudioTrackInfo } from "../../shared/types";
 import { getAuthFromRequest, ensureUploadAuthorized } from "./upload-auth";
 import {
   decodeSubtitleBuffer,
@@ -283,11 +284,29 @@ export async function cleanupRoomUploads(uploadsDir: string, roomId: string) {
 export function createUploadRouter(deps: UploadDeps): Router {
   const router = Router();
   const initialProcessingMessage = "Iniciando pós-processamento...";
+  const audioConversionErrorMessage = "Falha na conversão da faixa de áudio. Escolha outra faixa ou cancele o arquivo.";
+
+  const removeRoomSubtitles = async (roomId: string) => {
+    const subtitlesDir = getSubtitlesDir(deps.uploadsDir, roomId);
+    if (existsSync(subtitlesDir)) {
+      try {
+        await rm(subtitlesDir, { recursive: true, force: true });
+      } catch (error) {
+        logger.error("UploadRoute", `Falha ao remover legendas da sala ${roomId}`, error);
+      }
+    }
+
+    const room = deps.roomManager.getRoom(roomId);
+    if (room && room.state.subtitles.length > 0) {
+      deps.roomManager.updateState(roomId, { subtitles: [] });
+    }
+  };
 
   const processRoomMedia = async (
     roomId: string,
     filePath: string,
-    selectedAudioStreamIndex?: number
+    selectedAudioStreamIndex?: number,
+    availableAudioTracks: AudioTrackInfo[] = []
   ) => {
     try {
       const processor = new MediaProcessor(deps.roomManager);
@@ -301,10 +320,35 @@ export function createUploadRouter(deps: UploadDeps): Router {
         isAwaitingAudioSelection: false,
         audioTracks: [],
         selectedAudioStreamIndex: null,
+        audioSelectionErrorMessage: '',
       });
       deps.roomManager.broadcastAll(roomId, { type: "video-ready" });
     } catch (err) {
       logger.error("UploadRoute", `Falha ao processar mídia da sala ${roomId}`, err);
+
+      if (err instanceof AudioTrackConversionError) {
+        const room = deps.roomManager.getRoom(roomId);
+        const audioTracks = room?.state.audioTracks.length
+          ? room.state.audioTracks
+          : availableAudioTracks;
+
+        deps.roomManager.updateState(roomId, {
+          isProcessing: false,
+          processingMessage: '',
+          pendingVideoPath: filePath,
+          isAwaitingAudioSelection: true,
+          audioTracks,
+          selectedAudioStreamIndex: null,
+          audioSelectionErrorMessage: audioConversionErrorMessage,
+        });
+
+        deps.roomManager.broadcastAll(roomId, {
+          type: "audio-track-selection-required",
+          audioTracks,
+          errorMessage: audioConversionErrorMessage,
+        });
+        return;
+      }
 
       if (existsSync(filePath)) {
         try {
@@ -321,6 +365,7 @@ export function createUploadRouter(deps: UploadDeps): Router {
         isAwaitingAudioSelection: false,
         audioTracks: [],
         selectedAudioStreamIndex: null,
+        audioSelectionErrorMessage: '',
       });
       deps.roomManager.broadcastAll(roomId, {
         type: "processing-progress",
@@ -332,17 +377,19 @@ export function createUploadRouter(deps: UploadDeps): Router {
   const startRoomProcessing = (
     roomId: string,
     filePath: string,
-    selectedAudioStreamIndex?: number
+    selectedAudioStreamIndex?: number,
+    availableAudioTracks: AudioTrackInfo[] = []
   ) => {
     deps.roomManager.updateState(roomId, {
       isUploading: false,
       uploadProgress: 100,
       isAwaitingAudioSelection: false,
-      audioTracks: [],
+      audioTracks: availableAudioTracks,
       selectedAudioStreamIndex: selectedAudioStreamIndex ?? null,
       pendingVideoPath: filePath,
       isProcessing: true,
       processingMessage: initialProcessingMessage,
+      audioSelectionErrorMessage: '',
     });
 
     deps.roomManager.broadcastAll(roomId, {
@@ -350,7 +397,7 @@ export function createUploadRouter(deps: UploadDeps): Router {
       processingMessage: initialProcessingMessage,
     });
 
-    processRoomMedia(roomId, filePath, selectedAudioStreamIndex).catch((error) => {
+    processRoomMedia(roomId, filePath, selectedAudioStreamIndex, availableAudioTracks).catch((error) => {
       logger.error("UploadRoute", `Falha inesperada no fluxo de processamento da sala ${roomId}`, error);
     });
   };
@@ -501,6 +548,7 @@ export function createUploadRouter(deps: UploadDeps): Router {
       isAwaitingAudioSelection: false,
       audioTracks: [],
       selectedAudioStreamIndex: null,
+      audioSelectionErrorMessage: '',
       pendingVideoPath: '',
       processingMessage: '',
     });
@@ -640,6 +688,7 @@ export function createUploadRouter(deps: UploadDeps): Router {
         isAwaitingAudioSelection: true,
         audioTracks,
         selectedAudioStreamIndex: null,
+        audioSelectionErrorMessage: '',
         pendingVideoPath: finalPath,
         isProcessing: false,
         processingMessage: '',
@@ -648,6 +697,7 @@ export function createUploadRouter(deps: UploadDeps): Router {
       deps.roomManager.broadcastAll(roomId, {
         type: "audio-track-selection-required",
         audioTracks,
+        errorMessage: '',
       });
 
       res.json({
@@ -660,7 +710,7 @@ export function createUploadRouter(deps: UploadDeps): Router {
     }
 
     const selectedAudioStreamIndex = audioTracks.length === 1 ? audioTracks[0].streamIndex : undefined;
-    startRoomProcessing(roomId, finalPath, selectedAudioStreamIndex);
+    startRoomProcessing(roomId, finalPath, selectedAudioStreamIndex, audioTracks);
     res.json({ success: true, filename: safeFilename, processing: true });
   });
 
@@ -703,8 +753,71 @@ export function createUploadRouter(deps: UploadDeps): Router {
       return;
     }
 
-    startRoomProcessing(roomId, room.state.pendingVideoPath, streamIndex);
+    startRoomProcessing(roomId, room.state.pendingVideoPath, streamIndex, room.state.audioTracks);
     res.json({ success: true, processing: true });
+  });
+
+  router.post("/cancel-pending/:roomId", async (req, res) => {
+    const { roomId } = req.params;
+    const room = deps.roomManager.getRoom(roomId);
+    if (!room) {
+      res.status(404).json({ error: "Sala não encontrada" });
+      return;
+    }
+
+    const auth = getAuthFromRequest(req, req.body);
+    const authError = ensureUploadAuthorized(roomId, auth.token, auth.hostId, deps);
+    if (authError) {
+      res.status(authError.status).json({ error: authError.error });
+      return;
+    }
+
+    if (room.state.isProcessing) {
+      res.status(409).json({ error: "Não é possível cancelar enquanto o arquivo está em processamento" });
+      return;
+    }
+
+    if (!room.state.pendingVideoPath) {
+      res.status(400).json({ error: "Nenhum arquivo pendente para cancelar" });
+      return;
+    }
+
+    const pendingPath = room.state.pendingVideoPath;
+    const uploadsRoot = resolve(deps.uploadsDir);
+    const resolvedPendingPath = resolve(pendingPath);
+
+    if (!resolvedPendingPath.startsWith(uploadsRoot)) {
+      res.status(403).json({ error: "Arquivo pendente inválido" });
+      return;
+    }
+
+    if (existsSync(pendingPath)) {
+      try {
+        await rm(pendingPath, { force: true });
+      } catch (error) {
+        logger.error("UploadRoute", `Falha ao remover arquivo pendente ${pendingPath}`, error);
+      }
+    }
+
+    await removeRoomSubtitles(roomId);
+
+    deps.roomManager.updateState(roomId, {
+      isUploading: false,
+      uploadProgress: 0,
+      pendingVideoPath: '',
+      isAwaitingAudioSelection: false,
+      audioTracks: [],
+      selectedAudioStreamIndex: null,
+      audioSelectionErrorMessage: '',
+      isProcessing: false,
+      processingMessage: '',
+    });
+
+    deps.roomManager.broadcastAll(roomId, {
+      type: "pending-upload-cancelled",
+    });
+
+    res.json({ success: true });
   });
 
   router.post("/progress/:roomId", async (req, res) => {

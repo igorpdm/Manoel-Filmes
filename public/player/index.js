@@ -81,7 +81,7 @@ async function checkRoomStatus() {
         }
 
         if (data.isAwaitingAudioSelection) {
-            showAudioTrackSelection(data.audioTracks || []);
+            showAudioTrackSelection(data.audioTracks || [], data.audioSelectionErrorMessage || '');
             return;
         }
 

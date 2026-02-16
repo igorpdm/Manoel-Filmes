@@ -1,7 +1,7 @@
 import { dom } from './dom.js';
 import { state, constants } from './state.js';
 import { formatBytes, formatEta } from './utils.js';
-import { showUploadProgress, showAudioTrackSelection, showProcessingProgress, updateUploadProgress } from './ui.js';
+import { showUploadProgress, showAudioTrackSelection, showProcessingProgress, updateUploadProgress, updateHostUI } from './ui.js';
 
 function log(...args) {
     if (location.hostname === 'localhost') {
@@ -86,10 +86,14 @@ async function confirmAudioTrackSelection() {
         dom.audioTrackError.textContent = '';
         dom.audioTrackError.classList.add('hidden');
     }
+    state.audioSelectionErrorMessage = '';
 
     if (dom.btnConfirmAudioTrack) {
         dom.btnConfirmAudioTrack.disabled = true;
         dom.btnConfirmAudioTrack.textContent = 'Processando...';
+    }
+    if (dom.btnCancelPendingFile) {
+        dom.btnCancelPendingFile.disabled = true;
     }
 
     try {
@@ -105,16 +109,72 @@ async function confirmAudioTrackSelection() {
         }
 
         state.selectedAudioStreamIndex = streamIndex;
+        state.audioSelectionErrorMessage = '';
         showProcessingProgress('Processando vídeo... (Isso pode levar alguns minutos)');
     } catch (error) {
+        state.audioSelectionErrorMessage = error?.message || 'Erro ao confirmar faixa de áudio';
         if (dom.audioTrackError) {
-            dom.audioTrackError.textContent = error?.message || 'Erro ao confirmar faixa de áudio';
+            dom.audioTrackError.textContent = state.audioSelectionErrorMessage;
             dom.audioTrackError.classList.remove('hidden');
         }
     } finally {
         if (dom.btnConfirmAudioTrack) {
             dom.btnConfirmAudioTrack.disabled = false;
             dom.btnConfirmAudioTrack.textContent = 'Confirmar faixa';
+        }
+        if (dom.btnCancelPendingFile) {
+            dom.btnCancelPendingFile.disabled = false;
+        }
+    }
+}
+
+async function cancelPendingFile() {
+    if (!state.isHost) return;
+
+    if (dom.btnCancelPendingFile) {
+        dom.btnCancelPendingFile.disabled = true;
+        dom.btnCancelPendingFile.textContent = 'Cancelando...';
+    }
+    if (dom.btnConfirmAudioTrack) {
+        dom.btnConfirmAudioTrack.disabled = true;
+    }
+
+    try {
+        const response = await fetch(`/api/upload/cancel-pending/${state.roomId}`, {
+            method: 'POST',
+            headers: { ...buildAuthHeaders() }
+        });
+
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            throw new Error(data.error || 'Erro ao cancelar arquivo pendente');
+        }
+
+        state.roomStage = 'idle';
+        state.hasVideo = false;
+        state.audioTracks = [];
+        state.selectedAudioStreamIndex = null;
+        state.audioSelectionErrorMessage = '';
+
+        if (dom.audioTrackError) {
+            dom.audioTrackError.textContent = '';
+            dom.audioTrackError.classList.add('hidden');
+        }
+
+        updateHostUI();
+    } catch (error) {
+        state.audioSelectionErrorMessage = error?.message || 'Erro ao cancelar arquivo pendente';
+        if (dom.audioTrackError) {
+            dom.audioTrackError.textContent = state.audioSelectionErrorMessage;
+            dom.audioTrackError.classList.remove('hidden');
+        }
+    } finally {
+        if (dom.btnConfirmAudioTrack) {
+            dom.btnConfirmAudioTrack.disabled = false;
+        }
+        if (dom.btnCancelPendingFile) {
+            dom.btnCancelPendingFile.disabled = false;
+            dom.btnCancelPendingFile.textContent = 'Cancelar arquivo';
         }
     }
 }
@@ -381,6 +441,7 @@ async function uploadPendingSubtitles() {
 
 export function bindUploadEvents() {
     dom.btnConfirmAudioTrack?.addEventListener('click', confirmAudioTrackSelection);
+    dom.btnCancelPendingFile?.addEventListener('click', cancelPendingFile);
 
     dom.btnSelectFile?.addEventListener('click', () => dom.fileInput.click());
     dom.fileInput?.addEventListener('change', async (e) => {

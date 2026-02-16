@@ -92,6 +92,7 @@ export class RoomManager {
                 isAwaitingAudioSelection: false,
                 audioTracks: [],
                 selectedAudioStreamIndex: null,
+                audioSelectionErrorMessage: '',
                 isProcessing: false,
                 processingMessage: '',
                 hostId,
@@ -250,6 +251,7 @@ export class RoomManager {
                 isAwaitingAudioSelection: false,
                 audioTracks: [],
                 selectedAudioStreamIndex: null,
+                audioSelectionErrorMessage: '',
                 isProcessing: false,
                 processingMessage: '',
                 hostId,
@@ -392,6 +394,7 @@ export class RoomManager {
             room.state.isAwaitingAudioSelection = false;
             room.state.audioTracks = [];
             room.state.selectedAudioStreamIndex = null;
+            room.state.audioSelectionErrorMessage = '';
             room.state.currentTime = 0;
             room.state.isPlaying = false;
             room.state.lastUpdate = Date.now();

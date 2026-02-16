@@ -251,8 +251,13 @@ body {
   @apply text-[0.85rem] text-[#cbd5e1];
 }
 
-.audio-track-confirm {
-  @apply mt-2 max-w-[220px] self-center;
+.audio-track-actions {
+  @apply mt-2 flex flex-wrap items-center justify-center gap-3;
+}
+
+.audio-track-confirm,
+.audio-track-cancel {
+  @apply m-0 max-w-[220px] w-auto px-6;
 }
 
 .spinner {

@@ -212,7 +212,15 @@ function handleMessage(data) {
             showUploadProgress(data.progress || 0);
             break;
         case 'audio-track-selection-required':
-            showAudioTrackSelection(data.audioTracks || []);
+            showAudioTrackSelection(data.audioTracks || [], data.errorMessage || '');
+            break;
+        case 'pending-upload-cancelled':
+            state.roomStage = 'idle';
+            state.hasVideo = false;
+            state.audioTracks = [];
+            state.selectedAudioStreamIndex = null;
+            state.audioSelectionErrorMessage = '';
+            updateHostUI();
             break;
         case 'processing-progress':
             const msg = data.processingMessage || 'Processando vídeo...';

@@ -2,6 +2,7 @@ import { Router } from "express";
 import { cleanupRoomUploads } from "./upload";
 import type { RoomManager } from "../../core/room-manager";
 import type { DiscordSession, MovieInfo, SelectedEpisode } from "../../shared/types";
+import type { SessionStatusData } from "../services/session-status";
 import { logger } from "../../shared/logger";
 import { sendRouteError } from "../http/route-error";
 import {
@@ -14,7 +15,7 @@ import { optionalString, requireNonEmptyString, requireNumberInRange, requireObj
 
 interface DiscordSessionDeps {
   roomManager: typeof RoomManager.prototype;
-  getSessionStatusData: (roomId: string) => Record<string, unknown> | null;
+  getSessionStatusData: (roomId: string) => SessionStatusData | null;
   uploadsDir: string;
 }
 

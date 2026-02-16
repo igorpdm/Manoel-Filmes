@@ -31,6 +31,7 @@ export interface RoomState {
     isAwaitingAudioSelection: boolean;
     audioTracks: AudioTrackInfo[];
     selectedAudioStreamIndex: number | null;
+    audioSelectionErrorMessage?: string;
     isProcessing: boolean;
     processingMessage?: string;
     hostId: string;
@@ -148,6 +149,7 @@ export type MessageType =
     | "upload-progress"
     | "upload-complete"
     | "audio-track-selection-required"
+    | "pending-upload-cancelled"
     | "processing-progress"
     | "video-ready"
     | "ping"
@@ -173,6 +175,8 @@ export interface WSMessage {
     progress?: number;
     processingMessage?: string;
     audioTracks?: AudioTrackInfo[];
+    audioSelectionErrorMessage?: string;
+    errorMessage?: string;
     filename?: string;
     timestamp?: number;
     serverTime?: number;
