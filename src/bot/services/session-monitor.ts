@@ -3,11 +3,12 @@ import { activeWatchSession, setActiveWatchSession, ActiveWatchSession } from ".
 import * as playerApi from "./player-api";
 import { buildSessionEmbed } from "../ui/embeds";
 import { buildSessionComponents } from "../ui/components";
+import { logger } from "../../shared/logger";
 import db from "../../database";
 
 const SESSION_CHECK_INTERVAL = 5000;
 const RECONNECT_DELAY = 2000;
-const MAX_SESSION_DURATION = 4 * 60 * 60 * 1000; // 4 hours
+const MAX_SESSION_DURATION = 4 * 60 * 60 * 1000;
 
 let monitorSocket: WebSocket | null = null;
 let monitorRoomId: string | null = null;
@@ -30,9 +31,8 @@ export const startSessionMonitor = (client: any) => {
             return;
         }
 
-        // Safety check: Kill monitoring if session is too old (Zombie session)
         if (Date.now() - session.createdAt > MAX_SESSION_DURATION) {
-            console.warn(`[SessionMonitor] Sessão expirada por tempo limite (${session.roomId}). Parando monitoramento.`);
+            logger.warn("SessionMonitor", `Sessão expirada por tempo limite (${session.roomId}). Parando monitoramento.`);
             setActiveWatchSession(null);
             resetMonitorState();
             closeSocket();
@@ -40,7 +40,7 @@ export const startSessionMonitor = (client: any) => {
         }
 
         if (!monitorSocket || monitorSocket.readyState === WebSocket.CLOSED || monitorRoomId !== session.roomId) {
-            console.log(`[SessionMonitor] Conectando ao WS: room=${session.roomId}`);
+            logger.info("SessionMonitor", `Conectando ao WS: room=${session.roomId}`);
             connectToSession(client, session);
         }
     }, SESSION_CHECK_INTERVAL);
@@ -80,7 +80,7 @@ function connectToSession(client: any, session: ActiveWatchSession) {
     monitorSocket = new WebSocket(wsUrl);
 
     monitorSocket.onopen = () => {
-        console.log(`[SessionMonitor] WS aberto: room=${session.roomId}`);
+        logger.info("SessionMonitor", `WS aberto: room=${session.roomId}`);
         reconnectAttempts = 0;
         try {
             monitorSocket?.send(JSON.stringify({ type: "session-status" }));
@@ -120,18 +120,18 @@ function connectToSession(client: any, session: ActiveWatchSession) {
     };
 
     monitorSocket.onclose = () => {
-        console.log(`[SessionMonitor] WS fechado: room=${session.roomId}`);
+        logger.info("SessionMonitor", `WS fechado: room=${session.roomId}`);
         monitorSocket = null;
         scheduleReconnect(client);
     };
 
     monitorSocket.onerror = () => {
-        console.log(`[SessionMonitor] WS erro: room=${session.roomId}`);
+        logger.warn("SessionMonitor", `WS erro: room=${session.roomId}`);
         monitorSocket?.close();
     };
 }
 
-function buildWsUrl(roomId: string, token: string) {
+function buildWsUrl(roomId: string, token: string): string {
     const baseUrl = playerApi.getPlayerUrl();
     const wsBase = baseUrl.startsWith("https://")
         ? baseUrl.replace("https://", "wss://")
@@ -147,7 +147,7 @@ function scheduleReconnect(client: any) {
 
     const delay = Math.min(RECONNECT_DELAY * Math.pow(2, reconnectAttempts), MAX_RECONNECT_DELAY);
     reconnectAttempts++;
-    console.log(`[SessionMonitor] Reconectando em ${delay}ms (tentativa ${reconnectAttempts})`);
+    logger.info("SessionMonitor", `Reconectando em ${delay}ms (tentativa ${reconnectAttempts})`);
 
     reconnectTimeout = setTimeout(() => {
         reconnectTimeout = null;
@@ -218,8 +218,8 @@ async function finalizeSession(session: ActiveWatchSession, ratings: any[]) {
     finalizing = true;
 
     try {
-        console.log(`[SessionMonitor] Finalizando sessão: room=${session.roomId} ratings=${ratings.length}`);
-        await db.registerMovieStart(session.movieName, session.tmdbInfo);
+        logger.info("SessionMonitor", `Finalizando sessão: room=${session.roomId} ratings=${ratings.length}`);
+        await db.registerMovieStart(session.movieName, session.tmdbInfo as unknown as Record<string, unknown>);
 
         if (session.tmdbInfo?.title) {
             await db.removeFromWatchlistByTitle(session.tmdbInfo.title);

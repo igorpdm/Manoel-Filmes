@@ -1,4 +1,4 @@
-import { ModalSubmitInteraction, MessageFlags } from "discord.js";
+import { GuildMember, ModalSubmitInteraction, MessageFlags } from "discord.js";
 import db from "../../database";
 import { searchMovieTmdb } from "../services/tmdb";
 import {
@@ -10,7 +10,7 @@ import {
 import { buildSessionEmbed } from "../ui/embeds";
 import { buildEpisodeSelectComponents, buildSessionConfirmComponents } from "../ui/components";
 
-export const handleModalSubmit = async (interaction: any) => {
+export const handleModalSubmit = async (interaction: ModalSubmitInteraction) => {
   if (interaction.customId === "session_create") {
     if (activeWatchSession) {
       await interaction.reply({
@@ -47,9 +47,11 @@ export const handleModalSubmit = async (interaction: any) => {
         tmdbInfo,
         sala,
         hostId: interaction.user.id,
-        hostUsername: interaction.member?.displayName ?? interaction.user.username,
-        channelId: interaction.channelId,
-        guildId: interaction.guildId,
+        hostUsername: interaction.member instanceof GuildMember
+          ? interaction.member.displayName
+          : interaction.user.username,
+        channelId: interaction.channelId ?? "",
+        guildId: interaction.guildId ?? "",
       });
       return;
     }
@@ -65,9 +67,11 @@ export const handleModalSubmit = async (interaction: any) => {
       tmdbInfo,
       sala,
       hostId: interaction.user.id,
-      hostUsername: interaction.member?.displayName ?? interaction.user.username,
-      channelId: interaction.channelId,
-      guildId: interaction.guildId,
+      hostUsername: interaction.member instanceof GuildMember
+        ? interaction.member.displayName
+        : interaction.user.username,
+      channelId: interaction.channelId ?? "",
+      guildId: interaction.guildId ?? "",
     });
     return;
   }

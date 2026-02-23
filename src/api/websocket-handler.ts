@@ -3,7 +3,7 @@ import { roomManager } from "../core/room-manager";
 import { logger } from "../shared/logger";
 import { buildSessionStatusData } from "./services/session-status";
 
-function isCommandSeqValid(roomId: string, seq?: number) {
+function isCommandSeqValid(roomId: string, seq?: number): boolean {
     if (typeof seq !== "number") return true;
     const lastSeq = roomManager.getLastCommandSeq(roomId);
     return seq > lastSeq;
@@ -20,17 +20,17 @@ export function handleWebSocketMessage(ws: ExtendedWebSocket, message: any) {
 
     const serverTime = Date.now();
 
-    // Filter spammy logs
-    if (data.type !== "ping" && 
-        data.type !== "pong" && 
-        data.type !== "update-metrics" && 
-        data.type !== "host-heartbeat" && 
-        data.type !== "state" &&
-        data.type !== "session-status") {
-        logger.info("WS", `Comando: ${data.type} (Client: ${clientId}, Room: ${roomId})`);
-    } else {
-        // Log heartbeat/metrics only in debug mode
+    const isVerboseType = data.type === "ping" ||
+        data.type === "pong" ||
+        data.type === "update-metrics" ||
+        data.type === "host-heartbeat" ||
+        data.type === "state" ||
+        data.type === "session-status";
+
+    if (isVerboseType) {
         logger.debug("WS", `Heartbeat/Sync: ${data.type} (Room: ${roomId})`);
+    } else {
+        logger.info("WS", `Comando: ${data.type} (Client: ${clientId}, Room: ${roomId})`);
     }
 
     const isHost = token
@@ -57,7 +57,7 @@ export function handleWebSocketMessage(ws: ExtendedWebSocket, message: any) {
             }));
             break;
 
-        case "play":
+        case "play": {
             if (!isHost) break;
             if (!isCommandSeqValid(roomId, data.seq)) break;
 
@@ -94,6 +94,7 @@ export function handleWebSocketMessage(ws: ExtendedWebSocket, message: any) {
                 roomManager.setLastCommandSeq(roomId, data.seq);
             }
             break;
+        }
 
         case 'update-metrics':
             if (data.metrics && token) {
@@ -152,7 +153,7 @@ export function handleWebSocketMessage(ws: ExtendedWebSocket, message: any) {
             }
             break;
 
-        case "state":
+        case "state": {
             const room = roomManager.getRoom(roomId);
             if (room) {
                 const currentTime = roomManager.getCurrentTime(roomId);
@@ -164,5 +165,6 @@ export function handleWebSocketMessage(ws: ExtendedWebSocket, message: any) {
                 }));
             }
             break;
+        }
     }
 }

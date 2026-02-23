@@ -3,9 +3,13 @@ import {
   ButtonBuilder,
   ButtonStyle,
   EmbedBuilder,
+  GuildMember,
   MessageFlags,
   ButtonInteraction,
+  TextChannel,
+  NewsChannel,
 } from "discord.js";
+import type { SelectedEpisode } from "../../shared/types";
 import db from "../../database";
 import * as playerApi from "../services/player-api";
 import {
@@ -33,7 +37,7 @@ import {
   recCache,
 } from "../state";
 
-export const handleButton = async (interaction: any) => {
+export const handleButton = async (interaction: ButtonInteraction) => {
   const { customId } = interaction;
 
   if (customId === "register_confirm" || customId === "register_cancel") {
@@ -50,7 +54,7 @@ export const handleButton = async (interaction: any) => {
     }
 
     const movieKey = pending.tmdbInfo?.title || pending.filmeBusca;
-    await db.registerMovieStart(movieKey, pending.tmdbInfo);
+    await db.registerMovieStart(movieKey, pending.tmdbInfo as unknown as Record<string, unknown>);
 
     const movieId = toMovieId(movieKey);
     votingCache.set(movieId, {
@@ -69,7 +73,7 @@ export const handleButton = async (interaction: any) => {
     });
 
     const message = await interaction.fetchReply();
-    await db.saveActiveVoting(movieKey, message.id, interaction.channelId, pending.tmdbInfo, pending.usuariosIds);
+    await db.saveActiveVoting(movieKey, message.id, interaction.channelId, pending.tmdbInfo as unknown as Record<string, unknown>, pending.usuariosIds);
     pendingRegisterCache.delete(interaction.message.id);
     return;
   }
@@ -89,7 +93,7 @@ export const handleButton = async (interaction: any) => {
 
     const success = await db.addToWatchlist(
       pending.tmdbInfo.title,
-      pending.tmdbInfo,
+      pending.tmdbInfo as unknown as Record<string, unknown>,
       pending.userId,
       pending.userName,
       pending.reason
@@ -127,11 +131,11 @@ export const handleButton = async (interaction: any) => {
     }
 
     const score = Number(scoreRaw);
-    await db.addVote(cached.movieKey, interaction.user.id, interaction.member?.displayName ?? interaction.user.username, score);
+    await db.addVote(cached.movieKey, interaction.user.id, interaction.member instanceof GuildMember ? interaction.member.displayName : interaction.user.username, score);
 
     const ratings = await db.getMovieRatings(cached.movieKey);
-    const notas = ratings.map((rating: any) => rating.score);
-    const media = notas.reduce((acc: number, value: number) => acc + value, 0) / notas.length;
+    const scores = ratings.map((rating) => rating.score);
+    const media = scores.reduce((acc, value) => acc + value, 0) / scores.length;
     const totalVotos = ratings.length;
     const totalPermitidos = cached.allowedUsers.length;
 
@@ -160,7 +164,7 @@ export const handleButton = async (interaction: any) => {
     }
 
     const ratings = await db.getMovieRatings(cached.movieKey);
-    const usuariosVotaram = new Set(ratings.map((rating: any) => String(rating.user_id)));
+    const usuariosVotaram = new Set(ratings.map((rating) => String(rating.user_id)));
     const usuariosFaltam = cached.allowedUsers.filter((uid: string) => !usuariosVotaram.has(uid));
 
     if (!usuariosFaltam.length) {
@@ -179,40 +183,43 @@ export const handleButton = async (interaction: any) => {
     return;
   }
 
-      if (customId === "session_confirm" || customId === "session_cancel") {
-      const pending = pendingSessionCache.get(interaction.message.id);
-      if (!pending) {
-        await interaction.reply({ content: "❌ Esta confirmação expirou.", flags: MessageFlags.Ephemeral });
+  if (customId === "session_confirm" || customId === "session_cancel") {
+    const pending = pendingSessionCache.get(interaction.message.id);
+    if (!pending) {
+      await interaction.reply({ content: "❌ Esta confirmação expirou.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    if (customId === "session_cancel") {
+      pendingSessionCache.delete(interaction.message.id);
+      await interaction.update({ content: "❌ Sessão cancelada.", embeds: [], components: [] });
+      return;
+    }
+
+    await interaction.update({ content: "⏳ Processando solicitação...", embeds: [], components: [] });
+
+    if (!interaction.channel) {
+      await interaction.editReply({ content: "❌ Erro: Canal não identificado." });
+      return;
+    }
+
+    let publicMessage;
+    try {
+      if (!interaction.channel || !(interaction.channel instanceof TextChannel || interaction.channel instanceof NewsChannel)) {
+        await interaction.editReply({ content: "❌ Erro: Canal inválido (não é um canal de texto de servidor)." });
         return;
       }
-  
-      if (customId === "session_cancel") {
-        pendingSessionCache.delete(interaction.message.id);
-        await interaction.update({ content: "❌ Sessão cancelada.", embeds: [], components: [] });
-        return;
-      }
-  
-      // Defer update immediately to prevent interaction timeout
-      await interaction.update({ content: "⏳ Processando solicitação...", embeds: [], components: [] });
-  
-      if (!interaction.channel) {
-        await interaction.editReply({ content: "❌ Erro: Canal não identificado." });
-        return;
-      }
-  
-      let publicMessage;
-      try {
-        publicMessage = await interaction.channel.send({ content: "⏳ Criando sessão..." });
-      } catch (error) {
-        await interaction.editReply({ content: "❌ Erro ao postar no canal (verifique permissões)." });
-        return;
-      }
-    let selectedEpisodeInfo = pending.selectedEpisode;
+      publicMessage = await interaction.channel.send({ content: "⏳ Criando sessão..." });
+    } catch (error) {
+      await interaction.editReply({ content: "❌ Erro ao postar no canal (verifique permissões)." });
+      return;
+    }
+    let selectedEpisodeInfo: SelectedEpisode | undefined;
 
     if (pending.tmdbInfo.seasons && pending.selectedSeason && pending.selectedEpisode) {
-      const season = pending.tmdbInfo.seasons.find((s: any) => s.seasonNumber === pending.selectedSeason);
+      const season = pending.tmdbInfo.seasons.find((s) => s.seasonNumber === pending.selectedSeason);
       if (season) {
-        const episode = season.episodes.find((ep: any) => ep.episodeNumber === pending.selectedEpisode);
+        const episode = season.episodes.find((ep) => ep.episodeNumber === pending.selectedEpisode);
         if (episode) {
           selectedEpisodeInfo = {
             ...episode,
@@ -231,10 +238,15 @@ export const handleButton = async (interaction: any) => {
       title: pending.sala,
       movieName: displayTitle,
       movieInfo: {
-        ...pending.tmdbInfo,
+        id: pending.tmdbInfo.id,
+        title: pending.tmdbInfo.title,
+        overview: pending.tmdbInfo.overview,
         posterUrl: pending.tmdbInfo.poster_url,
-        voteAverage: pending.tmdbInfo.vote_average,
+        backdropUrl: null,
         releaseDate: pending.tmdbInfo.release_date,
+        voteAverage: pending.tmdbInfo.vote_average,
+        genres: pending.tmdbInfo.genres,
+        mediaType: pending.tmdbInfo.media_type,
       },
       discordSession: {
         channelId: pending.channelId,
@@ -328,7 +340,7 @@ export const handleButton = async (interaction: any) => {
     const result = await playerApi.generateUserToken(
       roomId,
       interaction.user.id,
-      interaction.member?.displayName ?? interaction.user.username
+      interaction.member instanceof GuildMember ? interaction.member.displayName : interaction.user.username
     );
 
     if (!result) {
@@ -399,7 +411,7 @@ export const handleButton = async (interaction: any) => {
     }
 
     const { items: nextItems, total: nextTotal } = await db.getWatchlist(nextPage, perPage);
-    const embed = buildWatchlistEmbed(nextItems, nextTotal, cached.botAvatarUrl, nextPage);
+    const embed = buildWatchlistEmbed(nextItems, nextTotal, cached.botAvatarUrl ?? null, nextPage);
     const components = buildWatchlistComponents(nextPage, nextTotal);
     cached.page = nextPage;
 

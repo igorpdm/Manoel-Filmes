@@ -95,7 +95,7 @@ async function closeUploadHandle(uploadId: string) {
 async function getOrLoadMeta(chunksDir: string, uploadId: string): Promise<UploadMeta | null> {
   const pending = metaLoadPromises.get(uploadId);
   if (pending) return pending;
-  
+
   const cached = metaCache.get(uploadId);
   if (cached) return cached;
 
@@ -121,7 +121,7 @@ async function syncMetaToDisk(uploadId: string): Promise<void> {
   const meta = metaCache.get(uploadId);
   const chunksDir = uploadDirsById.get(uploadId);
   if (!meta || !chunksDir) return;
-  
+
   const receivedSet = receivedChunkSets.get(uploadId);
   if (receivedSet) {
     meta.receivedChunks = Array.from(receivedSet);
@@ -202,19 +202,19 @@ async function cleanupUploads(uploadsDir: string) {
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
     if (entry.name.endsWith('_subtitles')) continue;
-    
+
     const uploadId = entry.name;
     const dirPath = join(uploadsDir, uploadId);
-    
+
     let meta: UploadMeta | null = metaCache.get(uploadId) ?? null;
-    
+
     if (!meta) {
-        meta = readMeta(dirPath);
-        if (meta) {
-          metaCache.set(uploadId, meta);
-          receivedChunkSets.set(uploadId, new Set(meta.receivedChunks || []));
-          uploadDirsById.set(uploadId, dirPath);
-        }
+      meta = readMeta(dirPath);
+      if (meta) {
+        metaCache.set(uploadId, meta);
+        receivedChunkSets.set(uploadId, new Set(meta.receivedChunks || []));
+        uploadDirsById.set(uploadId, dirPath);
+      }
     }
 
     const age = meta?.lastActivity
@@ -259,8 +259,8 @@ export async function cleanupRoomUploads(uploadsDir: string, roomId: string) {
   for (const dir of dirs) {
     const dirName = basename(dir);
     if (dirName) {
-         await closeUploadHandle(dirName);
-         clearMetaCache(dirName);
+      await closeUploadHandle(dirName);
+      clearMetaCache(dirName);
     }
     await removeUpload(dir);
   }
@@ -460,7 +460,7 @@ export function createUploadRouter(deps: UploadDeps): Router {
     if (authError) { res.status(authError.status).json({ error: authError.error }); return; }
 
     const chunksDir = join(deps.uploadsDir, uploadId);
-    
+
     await closeUploadHandle(uploadId);
     clearMetaCache(uploadId);
     await removeUpload(chunksDir);
@@ -650,7 +650,7 @@ export function createUploadRouter(deps: UploadDeps): Router {
 
     const chunksDir = join(deps.uploadsDir, uploadId);
     const safeFilename = sanitizeUploadFilename(filename);
-    
+
     const meta = metaCache.get(uploadId);
     if (!meta || meta.roomId !== roomId) {
       res.status(400).json({ error: "Upload inválido" });
@@ -665,12 +665,12 @@ export function createUploadRouter(deps: UploadDeps): Router {
 
     const finalPath = join(deps.uploadsDir, `${uploadId}_${safeFilename}`);
     const partPath = getPartPath(chunksDir);
-    
+
     // Garante consistência em disco antes de finalizar o arquivo.
     await closeUploadHandle(uploadId);
     await syncMetaToDisk(uploadId);
     clearMetaCache(uploadId);
-    
+
     await fs.rename(partPath, finalPath);
     await removeUpload(chunksDir);
 

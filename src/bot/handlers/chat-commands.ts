@@ -1,6 +1,8 @@
 import {
   ActionRowBuilder,
+  ChatInputCommandInteraction,
   EmbedBuilder,
+  GuildMember,
   ModalBuilder,
   TextInputBuilder,
   TextInputStyle,
@@ -32,7 +34,23 @@ import {
   activeWatchSession,
 } from "../state";
 
-export const handleChatInputCommand = async (interaction: any) => {
+function buildRecommendationPrompt(historico: string, quantidade: number, genero: string | null): string {
+  const generoInstrucao = genero ? ` no gênero ${genero}` : "";
+  return (
+    `Você é um especialista em filmes. Baseado no histórico de filmes assistidos por um grupo de amigos e suas avaliações, recomende ${quantidade} filmes${generoInstrucao} que eles provavelmente vão gostar.\n\n` +
+    `HISTÓRICO DO GRUPO:\n${historico}\n\n` +
+    "INSTRUÇÕES:\n" +
+    "1. Analise os filmes bem avaliados para entender os gostos do grupo.\n" +
+    "2. Recomende filmes que NÃO estão no histórico.\n" +
+    "3. Para cada recomendação, explique brevemente por que o grupo vai gostar.\n" +
+    "4. Use filmes reais e populares.\n\n" +
+    "FORMATO DE RESPOSTA (JSON):\n" +
+    "{\n  \"recomendacoes\": [\n    {\"titulo\": \"Nome do Filme\", \"motivo\": \"Breve explicação\"}\n  ]\n}\n\n" +
+    "Responda APENAS com o JSON."
+  );
+}
+
+export const handleChatInputCommand = async (interaction: ChatInputCommandInteraction) => {
   const { commandName } = interaction;
 
   if (commandName === "help") {
@@ -172,12 +190,12 @@ export const handleChatInputCommand = async (interaction: any) => {
   if (commandName === "listar") {
     await interaction.deferReply();
     const filmes = await db.getAllMoviesWithRatings();
-    filmes.sort((a: any, b: any) => {
+    filmes.sort((a, b) => {
       const mediaA = a.avaliacoes.length
-        ? a.avaliacoes.reduce((acc: number, value: any) => acc + value.score, 0) / a.avaliacoes.length
+        ? a.avaliacoes.reduce((acc, av) => acc + av.score, 0) / a.avaliacoes.length
         : 0;
       const mediaB = b.avaliacoes.length
-        ? b.avaliacoes.reduce((acc: number, value: any) => acc + value.score, 0) / b.avaliacoes.length
+        ? b.avaliacoes.reduce((acc, av) => acc + av.score, 0) / b.avaliacoes.length
         : 0;
       return mediaB - mediaA;
     });
@@ -249,7 +267,9 @@ export const handleChatInputCommand = async (interaction: any) => {
       pendingWatchlistCache.set(message.id, {
         tmdbInfo,
         userId: interaction.user.id,
-        userName: interaction.member?.displayName ?? interaction.user.username,
+        userName: interaction.member instanceof GuildMember
+          ? interaction.member.displayName
+          : interaction.user.username,
         reason: motivo,
       });
       return;
@@ -289,12 +309,12 @@ export const handleChatInputCommand = async (interaction: any) => {
     const filmes = await db.getAllMoviesWithRatings();
     const userId = String(interaction.user.id);
 
-    const minhasNotas: any[] = [];
-    filmes.forEach((filme: any) => {
-      const avaliacao = filme.avaliacoes.find((av: any) => av.user_id === userId);
+    const minhasNotas: { filme: string; nota: number; media: number; poster: string | null }[] = [];
+    filmes.forEach((filme) => {
+      const avaliacao = filme.avaliacoes.find((av) => av.user_id === userId);
       if (avaliacao) {
-        const notasFilme = filme.avaliacoes.map((av: any) => av.score);
-        const mediaFilme = notasFilme.reduce((acc: number, value: number) => acc + value, 0) / notasFilme.length;
+        const notasFilme = filme.avaliacoes.map((av) => av.score);
+        const mediaFilme = notasFilme.reduce((acc, value) => acc + value, 0) / notasFilme.length;
         minhasNotas.push({
           filme: filme.title,
           nota: avaliacao.score,
@@ -312,7 +332,7 @@ export const handleChatInputCommand = async (interaction: any) => {
     minhasNotas.sort((a, b) => b.nota - a.nota);
 
     const embed = new EmbedBuilder()
-      .setTitle(`🎬 Avaliações de ${interaction.member?.displayName ?? interaction.user.username}`)
+      .setTitle(`🎬 Avaliações de ${interaction.member instanceof GuildMember ? interaction.member.displayName : interaction.user.username}`)
       .setDescription(`Total: **${minhasNotas.length} filmes** avaliados`)
       .setColor(0x9b59b6);
 
@@ -348,7 +368,7 @@ export const handleChatInputCommand = async (interaction: any) => {
 
     const filme = interaction.options.getString("filme", true);
     const filmes = await db.getAllMoviesWithRatings();
-    const found = filmes.find((movie: any) => movie.title.toLowerCase().includes(filme.toLowerCase()));
+    const found = filmes.find((movie) => movie.title.toLowerCase().includes(filme.toLowerCase()));
     if (!found) {
       await interaction.reply({ content: `❌ Filme **${filme}** não encontrado!`, flags: MessageFlags.Ephemeral });
       return;
@@ -382,27 +402,16 @@ export const handleChatInputCommand = async (interaction: any) => {
     }
 
     const historico = filmesDb
-      .filter((filme: any) => filme.avaliacoes.length)
-      .map((filme: any) => {
-        const notas = filme.avaliacoes.map((av: any) => av.score);
-        const media = notas.reduce((acc: number, value: number) => acc + value, 0) / notas.length;
-        const detalhes = filme.avaliacoes.map((av: any) => `${av.user_name}: ${av.score}/10`).join(", ");
+      .filter((filme) => filme.avaliacoes.length)
+      .map((filme) => {
+        const notas = filme.avaliacoes.map((av) => av.score);
+        const media = notas.reduce((acc, value) => acc + value, 0) / notas.length;
+        const detalhes = filme.avaliacoes.map((av) => `${av.user_name}: ${av.score}/10`).join(", ");
         return `- ${filme.title}: Média ${media.toFixed(1)}/10 (Avaliações: ${detalhes})`;
       })
       .join("\n");
 
-    const generoInstrucao = genero ? ` no gênero ${genero}` : "";
-    const prompt =
-      `Você é um especialista em filmes. Baseado no histórico de filmes assistidos por um grupo de amigos e suas avaliações, recomende ${quantidade} filmes${generoInstrucao} que eles provavelmente vão gostar.\n\n` +
-      `HISTÓRICO DO GRUPO:\n${historico}\n\n` +
-      "INSTRUÇÕES:\n" +
-      "1. Analise os filmes bem avaliados para entender os gostos do grupo.\n" +
-      "2. Recomende filmes que NÃO estão no histórico.\n" +
-      "3. Para cada recomendação, explique brevemente por que o grupo vai gostar.\n" +
-      "4. Use filmes reais e populares.\n\n" +
-      "FORMATO DE RESPOSTA (JSON):\n" +
-      "{\n  \"recomendacoes\": [\n    {\"titulo\": \"Nome do Filme\", \"motivo\": \"Breve explicação\"}\n  ]\n}\n\n" +
-      "Responda APENAS com o JSON.";
+    const prompt = buildRecommendationPrompt(historico, quantidade, genero);
 
     try {
       let text = await generateRecommendations(prompt);

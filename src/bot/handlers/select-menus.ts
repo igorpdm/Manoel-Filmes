@@ -1,9 +1,9 @@
-import { MessageFlags } from "discord.js";
+import { AnySelectMenuInteraction, MessageFlags } from "discord.js";
 import { buildEpisodeSelectComponents } from "../ui/components";
 import { buildMovieDetailEmbed, buildRecommendationDetailEmbed } from "../ui/embeds";
 import { listCache, pendingSessionCache, recCache } from "../state";
 
-export const handleSelectMenu = async (interaction: any) => {
+export const handleSelectMenu = async (interaction: AnySelectMenuInteraction) => {
   if (
     interaction.customId === "session_season_select" ||
     interaction.customId === "session_episode_select"
@@ -21,11 +21,11 @@ export const handleSelectMenu = async (interaction: any) => {
       pending.selectedSeason = seasonNumber;
       pending.selectedEpisode = undefined;
 
-      const season = pending.tmdbInfo.seasons.find((s: any) => s.seasonNumber === seasonNumber);
+      const season = pending.tmdbInfo.seasons?.find((s) => s.seasonNumber === seasonNumber);
       const episodes = season ? season.episodes : [];
 
       const components = buildEpisodeSelectComponents(
-        pending.tmdbInfo.seasons,
+        pending.tmdbInfo.seasons ?? [],
         pending.selectedSeason,
         episodes,
         pending.selectedEpisode
@@ -36,11 +36,11 @@ export const handleSelectMenu = async (interaction: any) => {
       const episodeNumber = Number(interaction.values[0]);
       pending.selectedEpisode = episodeNumber;
 
-      const season = pending.tmdbInfo.seasons.find((s: any) => s.seasonNumber === pending.selectedSeason);
+      const season = pending.tmdbInfo.seasons?.find((s) => s.seasonNumber === pending.selectedSeason);
       const episodes = season ? season.episodes : [];
 
       const components = buildEpisodeSelectComponents(
-        pending.tmdbInfo.seasons,
+        pending.tmdbInfo.seasons ?? [],
         pending.selectedSeason,
         episodes,
         pending.selectedEpisode
