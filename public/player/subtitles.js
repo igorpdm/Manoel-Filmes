@@ -5,6 +5,7 @@ const STORAGE_KEY = 'manoel_subtitle_settings';
 
 const ASS_TAG_REGEX = /\{\\[^}]*\}/g;
 const HTML_TAG_REGEX = /<\/?(?!(?:i|b|u)\b)[^>]+>/gi;
+const ALLOWED_INLINE_TAG_REGEX = /&lt;(\/?(?:i|b|u))&gt;/gi;
 
 export const subtitleState = {
     cues: [],
@@ -58,6 +59,15 @@ function getScaledFontSize() {
     return Math.round(subtitleState.settings.fontSize * scale);
 }
 
+function formatSubtitleText(text) {
+    return text
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(ALLOWED_INLINE_TAG_REGEX, '<$1>')
+        .replace(/\n/g, '<br>');
+}
+
 export function renderSubtitle(currentTime) {
     if (!subtitleState.settings.enabled || subtitleState.cues.length === 0) {
         if (dom.subtitleDisplay) dom.subtitleDisplay.innerHTML = '';
@@ -76,11 +86,7 @@ export function renderSubtitle(currentTime) {
     if (!dom.subtitleDisplay) return;
 
     if (activeCue) {
-        const escapedText = activeCue.text
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/\n/g, '<br>');
-        dom.subtitleDisplay.innerHTML = escapedText;
+        dom.subtitleDisplay.innerHTML = formatSubtitleText(activeCue.text);
         dom.subtitleDisplay.style.opacity = '1';
     } else {
         dom.subtitleDisplay.innerHTML = '';
