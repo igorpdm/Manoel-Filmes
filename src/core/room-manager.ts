@@ -2,7 +2,6 @@ import { WebSocket } from "ws";
 import type {
     Room,
     RoomState,
-    ClientData,
     WSMessage,
     DiscordUser,
     DiscordSession,
@@ -13,20 +12,19 @@ import type {
     ExtendedWebSocket,
     SelectedEpisode
 } from "../shared/types";
-import { existsSync, statSync } from "fs";
+import { existsSync } from "fs";
 import { rm } from "fs/promises";
-import { randomUUID, randomBytes } from "crypto";
-import { join, resolve } from "path";
-import { fileURLToPath } from "url";
-import { dirname } from "path";
+import { randomUUID } from "crypto";
+import { resolve } from "path";
 import { UPLOADS_DIR } from "../config";
 import { logger } from "../shared/logger";
+import * as auth from "./room-auth";
+import * as playback from "./room-playback";
+import * as broadcast from "./room-broadcast";
 
-const ROOM_TIMEOUT_MS = 10 * 60 * 1000; // Reduced to 10 minutes
+const ROOM_TIMEOUT_MS = 10 * 60 * 1000;
 const MAX_CLIENTS_PER_ROOM = 10;
 const MAX_BANDWIDTH_MBPS = 150;
-const DEFAULT_BITRATE_MBPS = 15; // Assume 15 Mbps if file not ready
-const HOST_INACTIVE_TIMEOUT = 60 * 1000;
 const VIEWER_BROADCAST_DEBOUNCE = 500;
 
 export class RoomManager {
@@ -41,17 +39,24 @@ export class RoomManager {
         this.cleanupInterval = setInterval(() => this.cleanupInactiveRooms(), 5 * 60 * 1000);
     }
 
-    hasAnyRooms(): boolean {
-        return this.rooms.size > 0;
-    }
+    // ─── Room Queries ─────────────────────────────────────────────────────────
 
-    hasActiveDiscordSession(): boolean {
-        return this.activeDiscordSession !== null;
-    }
+    hasAnyRooms(): boolean { return this.rooms.size > 0; }
+    getRoom(id: string): Room | undefined { return this.rooms.get(id); }
+    forEachRoom(callback: (room: Room) => void): void { for (const room of this.rooms.values()) callback(room); }
+    hasActiveDiscordSession(): boolean { return this.activeDiscordSession !== null; }
 
     getActiveDiscordSessionRoom(): Room | null {
-        if (!this.activeDiscordSession) return null;
-        return this.rooms.get(this.activeDiscordSession) || null;
+        return this.activeDiscordSession ? (this.rooms.get(this.activeDiscordSession) ?? null) : null;
+    }
+
+    // ─── Room Lifecycle ───────────────────────────────────────────────────────
+
+    createRoom(videoPath?: string): string {
+        const id = randomUUID();
+        this.rooms.set(id, this.buildRoom(id, videoPath));
+        logger.info("RoomManager", `Sala simples criada: ${id}`);
+        return id;
     }
 
     createDiscordSession(
@@ -62,13 +67,11 @@ export class RoomManager {
         selectedEpisode?: SelectedEpisode
     ): { roomId: string; hostToken: string } | null {
         // TODO: por enquanto eu bloqueio novas salas se já tiver uma ativa.
-        if (this.activeDiscordSession || this.rooms.size > 0) {
-            return null;
-        }
+        if (this.activeDiscordSession || this.rooms.size > 0) return null;
 
-        const roomId = this.generateId();
-        const hostToken = this.generateToken();
-        const hostId = this.generateId();
+        const roomId = randomUUID();
+        const hostToken = auth.generateToken();
+        const hostId = randomUUID();
 
         const hostUser: DiscordUser = {
             discordId: discordSession.hostDiscordId,
@@ -80,121 +83,263 @@ export class RoomManager {
         };
 
         const room: Room = {
-            id: roomId,
-            state: {
-                videoPath: '',
-                pendingVideoPath: '',
-                currentTime: 0,
-                isPlaying: false,
-                lastUpdate: Date.now(),
-                isUploading: false,
-                uploadProgress: 0,
-                isAwaitingAudioSelection: false,
-                audioTracks: [],
-                selectedAudioStreamIndex: null,
-                audioSelectionErrorMessage: '',
-                isProcessing: false,
-                processingMessage: '',
-                hostId,
-                playbackStarted: false,
-                hostLastHeartbeat: Date.now(),
-                lastCommandSeq: 0,
-                subtitles: []
-            },
-            clients: new Set(),
+            ...this.buildRoom(roomId),
             title,
             movieName,
             movieInfo,
             selectedEpisode,
             discordSession,
-            tokenMap: new Map([[hostToken, hostUser]]),
-            ratings: [],
-            status: 'waiting'
+            tokenMap: new Map([[hostToken, hostUser]])
         };
+        room.state.hostId = hostId;
 
         this.rooms.set(roomId, room);
         this.activeDiscordSession = roomId;
-        
         logger.success("RoomManager", `Sessão Discord criada: ${roomId} (Host: ${hostUser.username})`);
         return { roomId, hostToken };
     }
 
-    generateUserToken(roomId: string, discordId: string, username: string): string | null {
+    async deleteRoom(roomId: string): Promise<void> {
         const room = this.rooms.get(roomId);
-        if (!room || !room.discordSession) return null;
+        if (!room) return;
+        logger.info("RoomManager", `Removendo sala: ${roomId}`);
 
-        for (const [token, user] of room.tokenMap) {
-            if (user.discordId === discordId) {
-                return token;
+        for (const client of room.clients) {
+            if (client.readyState === WebSocket.OPEN) client.close(1000, "Sala encerrada");
+        }
+        room.clients.clear();
+
+        const resolvedUploadsDir = resolve(UPLOADS_DIR);
+        const mediaPaths = Array.from(new Set(
+            [room.state.videoPath, room.state.pendingVideoPath].filter(Boolean)
+        ));
+
+        for (const mediaPath of mediaPaths) {
+            if (!existsSync(mediaPath)) continue;
+            if (!resolve(mediaPath).startsWith(resolvedUploadsDir)) {
+                logger.warn("RoomManager", `Ignorando deleção de arquivo externo: ${mediaPath}`);
+                continue;
+            }
+            try {
+                await rm(mediaPath, { force: true });
+            } catch (e) {
+                logger.error("RoomManager", "Erro ao deletar arquivo de mídia", e);
             }
         }
 
-        const token = this.generateToken();
-        room.tokenMap.set(token, {
-            discordId,
-            username,
-            isHost: false,
-            connected: false,
-            connectedAt: 0,
-            ping: -1
-        });
-        return token;
+        if (this.activeDiscordSession === roomId) this.activeDiscordSession = null;
+        this.rooms.delete(roomId);
+    }
+
+    private cleanupInactiveRooms(): void {
+        const now = Date.now();
+        for (const [roomId, room] of this.rooms) {
+            if (room.clients.size === 0 && now - room.state.lastUpdate > ROOM_TIMEOUT_MS) {
+                this.deleteRoom(roomId);
+            }
+        }
+    }
+
+    // ─── Client Management ────────────────────────────────────────────────────
+
+    addClient(roomId: string, ws: ExtendedWebSocket): boolean {
+        const room = this.rooms.get(roomId);
+        if (!room) return false;
+
+        const existingTimer = this.cleanupTimers.get(roomId);
+        if (existingTimer) {
+            clearTimeout(existingTimer);
+            this.cleanupTimers.delete(roomId);
+        }
+
+        if (room.clients.size >= MAX_CLIENTS_PER_ROOM) {
+            logger.warn("RoomManager", `Conexão rejeitada: sala ${roomId} cheia (${room.clients.size}/${MAX_CLIENTS_PER_ROOM})`);
+            return false;
+        }
+
+        const estimatedBitrate = playback.estimateBitrate(room);
+        const currentBandwidth = room.clients.size * estimatedBitrate;
+
+        if (currentBandwidth + estimatedBitrate > MAX_BANDWIDTH_MBPS) {
+            logger.warn("RoomManager", `Conexão rejeitada: limite de banda atingido para sala ${roomId}. Uso estimado: ${currentBandwidth.toFixed(1)} + ${estimatedBitrate.toFixed(1)} > ${MAX_BANDWIDTH_MBPS} Mbps`);
+            return false;
+        }
+
+        room.clients.add(ws);
+        logger.debug("Room", `Cliente conectado. Room: ${roomId}, Total: ${room.clients.size}, Banda est.: ${(currentBandwidth + estimatedBitrate).toFixed(1)} Mbps`);
+        this.broadcastViewerCountDebounced(roomId);
+        return true;
+    }
+
+    removeClient(roomId: string, ws: ExtendedWebSocket): void {
+        const room = this.rooms.get(roomId);
+        if (!room) return;
+        room.clients.delete(ws);
+        logger.debug("Room", `Cliente desconectado. Room: ${roomId}, Total: ${room.clients.size}`);
+
+        if (ws.data.token) {
+            const stillConnected = Array.from(room.clients).some(c => c.data.token === ws.data.token);
+            if (!stillConnected) auth.markUserDisconnected(room, ws.data.token);
+        }
+
+        if (room.clients.size === 0) {
+            this.scheduleRoomCleanup(roomId);
+        } else {
+            this.broadcastViewerCountDebounced(roomId);
+        }
+    }
+
+    getClientCount(roomId: string): number {
+        return this.rooms.get(roomId)?.clients.size ?? 0;
+    }
+
+    private scheduleRoomCleanup(roomId: string): void {
+        const existing = this.cleanupTimers.get(roomId);
+        if (existing) clearTimeout(existing);
+
+        const timer = setTimeout(() => {
+            const room = this.rooms.get(roomId);
+            if (room && room.clients.size === 0) this.deleteRoom(roomId);
+            this.cleanupTimers.delete(roomId);
+        }, 30000);
+
+        this.cleanupTimers.set(roomId, timer);
+    }
+
+    // ─── Auth ─────────────────────────────────────────────────────────────────
+
+    generateUserToken(roomId: string, discordId: string, username: string): string | null {
+        const room = this.rooms.get(roomId);
+        if (!room || !room.discordSession) return null;
+        return auth.generateUserToken(room, discordId, username);
     }
 
     validateToken(roomId: string, token: string): DiscordUser | null {
         const room = this.rooms.get(roomId);
-        if (!room) return null;
-        return room.tokenMap.get(token) || null;
+        return room ? auth.validateToken(room, token) : null;
     }
 
     markUserConnected(roomId: string, token: string): void {
         const room = this.rooms.get(roomId);
-        if (!room) return;
-
-        const user = room.tokenMap.get(token);
-        if (user) {
-            user.connected = true;
-            if (user.connectedAt === 0) {
-                user.connectedAt = Date.now();
-            }
-            logger.info("Room", `Usuário conectado: ${user.username} (Room: ${roomId})`);
-        }
+        if (room) auth.markUserConnected(room, token);
     }
 
     markUserDisconnected(roomId: string, token: string): void {
         const room = this.rooms.get(roomId);
-        if (!room) return;
-
-        const user = room.tokenMap.get(token);
-        if (user) {
-            user.connected = false;
-            logger.info("Room", `Usuário desconectado: ${user.username} (Room: ${roomId})`);
-        }
+        if (room) auth.markUserDisconnected(room, token);
     }
 
     getConnectedUsers(roomId: string): DiscordUser[] {
         const room = this.rooms.get(roomId);
-        if (!room) return [];
-
-        return Array.from(room.tokenMap.values()).filter(u => u.connected);
+        return room ? auth.getConnectedUsers(room) : [];
     }
 
     updateUserMetrics(roomId: string, token: string, metrics: ClientMetrics): void {
         const room = this.rooms.get(roomId);
-        if (!room) return;
-
-        const user = room.tokenMap.get(token);
-        if (user) {
-            user.ping = metrics.lastPing;
-        }
+        if (room) auth.updateUserMetrics(room, token, metrics);
     }
+
+    getHostId(roomId: string): string {
+        return this.rooms.get(roomId)?.state.hostId ?? '';
+    }
+
+    isHost(roomId: string, clientId: string): boolean {
+        return this.rooms.get(roomId)?.state.hostId === clientId;
+    }
+
+    isHostByToken(roomId: string, token: string): boolean {
+        const room = this.rooms.get(roomId);
+        return room ? auth.isHostByToken(room, token) : false;
+    }
+
+    isHostInactive(roomId: string): boolean {
+        const room = this.rooms.get(roomId);
+        return room ? playback.isHostInactive(room) : false;
+    }
+
+    transferHost(roomId: string): { newHostId: string; newHostUsername: string; token: string } | null {
+        const room = this.rooms.get(roomId);
+        return room ? auth.transferHost(room) : null;
+    }
+
+    // ─── Playback ─────────────────────────────────────────────────────────────
+
+    getCurrentTime(roomId: string): number {
+        const room = this.rooms.get(roomId);
+        return room ? playback.getCurrentTime(room) : 0;
+    }
+
+    getSyncInterval(roomId: string): number {
+        const room = this.rooms.get(roomId);
+        return room ? playback.getSyncInterval(room) : 5000;
+    }
+
+    hasVideo(roomId: string): boolean {
+        const room = this.rooms.get(roomId);
+        return room ? playback.hasVideo(room) : false;
+    }
+
+    setVideoPath(roomId: string, path: string): void {
+        const room = this.rooms.get(roomId);
+        if (room) playback.setVideoPath(room, path);
+    }
+
+    updateState(roomId: string, updates: Partial<RoomState>): void {
+        const room = this.rooms.get(roomId);
+        if (room) playback.updateState(room, updates);
+    }
+
+    updateHostHeartbeat(roomId: string): void {
+        const room = this.rooms.get(roomId);
+        if (room) playback.updateHostHeartbeat(room);
+    }
+
+    setLastCommandSeq(roomId: string, seq: number): void {
+        const room = this.rooms.get(roomId);
+        if (room) playback.setLastCommandSeq(room, seq);
+    }
+
+    getLastCommandSeq(roomId: string): number {
+        const room = this.rooms.get(roomId);
+        return room ? playback.getLastCommandSeq(room) : 0;
+    }
+
+    // ─── Broadcast ────────────────────────────────────────────────────────────
+
+    broadcast(roomId: string, message: WSMessage | string, exclude?: ExtendedWebSocket): void {
+        const room = this.rooms.get(roomId);
+        if (room) broadcast.broadcast(room, message, exclude);
+    }
+
+    broadcastAll(roomId: string, message: WSMessage | string): void {
+        const room = this.rooms.get(roomId);
+        if (room) broadcast.broadcastAll(room, message);
+    }
+
+    broadcastViewerCountDebounced(roomId: string): void {
+        const existing = this.viewerBroadcastTimeouts.get(roomId);
+        if (existing) clearTimeout(existing);
+
+        const timeout = setTimeout(() => {
+            this.broadcastViewerCount(roomId);
+            this.viewerBroadcastTimeouts.delete(roomId);
+        }, VIEWER_BROADCAST_DEBOUNCE);
+
+        this.viewerBroadcastTimeouts.set(roomId, timeout);
+    }
+
+    broadcastViewerCount(roomId: string): void {
+        const room = this.rooms.get(roomId);
+        if (room) broadcast.broadcastViewerCount(room, auth.getConnectedUsers(room));
+    }
+
+    // ─── Session & Ratings ────────────────────────────────────────────────────
 
     setSessionStatus(roomId: string, status: SessionStatus): void {
         const room = this.rooms.get(roomId);
-        if (room) {
-            room.status = status;
-            logger.info("Room", `Status atualizado para '${status}' na sala ${roomId}`);
-        }
+        if (!room) return;
+        room.status = status;
+        logger.info("Room", `Status atualizado para '${status}' na sala ${roomId}`);
     }
 
     addRating(roomId: string, discordId: string, username: string, rating: number): boolean {
@@ -213,35 +358,49 @@ export class RoomManager {
 
     getRatings(roomId: string): { ratings: SessionRating[]; average: number } {
         const room = this.rooms.get(roomId);
-        if (!room || room.ratings.length === 0) {
-            return { ratings: [], average: 0 };
-        }
-
+        if (!room || room.ratings.length === 0) return { ratings: [], average: 0 };
         const sum = room.ratings.reduce((acc, r) => acc + r.rating, 0);
-        const average = sum / room.ratings.length;
-
-        return { ratings: room.ratings, average: Math.round(average * 10) / 10 };
+        return { ratings: room.ratings, average: Math.round(sum / room.ratings.length * 10) / 10 };
     }
 
     allUsersRated(roomId: string): boolean {
         const room = this.rooms.get(roomId);
         if (!room) return false;
-
-        const connectedUsers = this.getConnectedUsers(roomId);
+        const connectedUsers = auth.getConnectedUsers(room);
         if (connectedUsers.length === 0) return true;
-
-        return connectedUsers.every(user =>
-            room.ratings.some(r => r.discordId === user.discordId)
-        );
+        return connectedUsers.every(user => room.ratings.some(r => r.discordId === user.discordId));
     }
 
-    createRoom(videoPath?: string): string {
-        const id = this.generateId();
-        const hostId = this.generateId();
-        const room: Room = {
+    // ─── Subtitles ────────────────────────────────────────────────────────────
+
+    addSubtitle(roomId: string, filename: string, displayName: string): boolean {
+        const room = this.rooms.get(roomId);
+        if (!room) return false;
+        if (!room.state.subtitles.some(s => s.filename === filename)) {
+            room.state.subtitles.push({ filename, displayName });
+        }
+        return true;
+    }
+
+    removeSubtitle(roomId: string, filename: string): boolean {
+        const room = this.rooms.get(roomId);
+        if (!room) return false;
+        const idx = room.state.subtitles.findIndex(s => s.filename === filename);
+        if (idx >= 0) { room.state.subtitles.splice(idx, 1); return true; }
+        return false;
+    }
+
+    getSubtitles(roomId: string): { filename: string; displayName: string }[] {
+        return this.rooms.get(roomId)?.state.subtitles ?? [];
+    }
+
+    // ─── Private Helpers ──────────────────────────────────────────────────────
+
+    private buildRoom(id: string, videoPath = ''): Room {
+        return {
             id,
             state: {
-                videoPath: videoPath || '',
+                videoPath,
                 pendingVideoPath: '',
                 currentTime: 0,
                 isPlaying: false,
@@ -254,7 +413,7 @@ export class RoomManager {
                 audioSelectionErrorMessage: '',
                 isProcessing: false,
                 processingMessage: '',
-                hostId,
+                hostId: randomUUID(),
                 playbackStarted: false,
                 hostLastHeartbeat: Date.now(),
                 lastCommandSeq: 0,
@@ -265,395 +424,6 @@ export class RoomManager {
             ratings: [],
             status: 'waiting'
         };
-        this.rooms.set(id, room);
-        logger.info("RoomManager", `Sala simples criada: ${id}`);
-        return id;
-    }
-
-    addSubtitle(roomId: string, filename: string, displayName: string): boolean {
-        const room = this.rooms.get(roomId);
-        if (!room) return false;
-        const exists = room.state.subtitles.some(s => s.filename === filename);
-        if (!exists) {
-            room.state.subtitles.push({ filename, displayName });
-        }
-        return true;
-    }
-
-    removeSubtitle(roomId: string, filename: string): boolean {
-        const room = this.rooms.get(roomId);
-        if (!room) return false;
-        const idx = room.state.subtitles.findIndex(s => s.filename === filename);
-        if (idx >= 0) {
-            room.state.subtitles.splice(idx, 1);
-            return true;
-        }
-        return false;
-    }
-
-    getSubtitles(roomId: string): { filename: string; displayName: string }[] {
-        const room = this.rooms.get(roomId);
-        return room?.state.subtitles || [];
-    }
-
-    getRoom(id: string): Room | undefined {
-        return this.rooms.get(id);
-    }
-
-    getHostId(roomId: string): string {
-        const room = this.rooms.get(roomId);
-        return room?.state.hostId || '';
-    }
-
-    isHost(roomId: string, clientId: string): boolean {
-        const room = this.rooms.get(roomId);
-        return room?.state.hostId === clientId;
-    }
-
-    isHostByToken(roomId: string, token: string): boolean {
-        const room = this.rooms.get(roomId);
-        if (!room) return false;
-        const user = room.tokenMap.get(token);
-        return user?.isHost || false;
-    }
-
-    getOldestConnectedUser(roomId: string): { token: string; user: DiscordUser } | null {
-        const room = this.rooms.get(roomId);
-        if (!room) return null;
-
-        let oldest: { token: string; user: DiscordUser } | null = null;
-
-        for (const [token, user] of room.tokenMap) {
-            if (!user.connected || user.isHost) continue;
-            if (!oldest || user.connectedAt < oldest.user.connectedAt) {
-                oldest = { token, user };
-            }
-        }
-
-        return oldest;
-    }
-
-    isHostInactive(roomId: string): boolean {
-        const room = this.rooms.get(roomId);
-        if (!room) return false;
-        if (room.state.isUploading) return false;
-
-        const hostInactive = Date.now() - room.state.hostLastHeartbeat > HOST_INACTIVE_TIMEOUT;
-        return hostInactive;
-    }
-
-    transferHost(roomId: string): { newHostId: string; newHostUsername: string; token: string } | null {
-        const room = this.rooms.get(roomId);
-        if (!room || !room.discordSession) return null;
-
-        const oldest = this.getOldestConnectedUser(roomId);
-        if (!oldest) return null;
-
-        for (const user of room.tokenMap.values()) {
-            user.isHost = false;
-        }
-
-        oldest.user.isHost = true;
-        room.discordSession.hostDiscordId = oldest.user.discordId;
-        room.state.hostLastHeartbeat = Date.now();
-
-        return {
-            newHostId: oldest.user.discordId,
-            newHostUsername: oldest.user.username,
-            token: oldest.token
-        };
-    }
-
-    getCurrentTime(roomId: string): number {
-        const room = this.rooms.get(roomId);
-        if (!room) return 0;
-
-        if (room.state.isPlaying) {
-            const elapsed = (Date.now() - room.state.lastUpdate) / 1000;
-            return room.state.currentTime + elapsed;
-        }
-
-        return room.state.currentTime;
-    }
-
-    getClientCount(roomId: string): number {
-        const room = this.rooms.get(roomId);
-        return room ? room.clients.size : 0;
-    }
-
-    hasVideo(roomId: string): boolean {
-        const room = this.rooms.get(roomId);
-        return room ? room.state.videoPath !== '' : false;
-    }
-
-    setVideoPath(roomId: string, path: string): void {
-        const room = this.rooms.get(roomId);
-        if (room) {
-            room.state.videoPath = path;
-            room.state.pendingVideoPath = '';
-            room.state.isAwaitingAudioSelection = false;
-            room.state.audioTracks = [];
-            room.state.selectedAudioStreamIndex = null;
-            room.state.audioSelectionErrorMessage = '';
-            room.state.currentTime = 0;
-            room.state.isPlaying = false;
-            room.state.lastUpdate = Date.now();
-        }
-    }
-
-    estimateBitrate(roomId: string): number {
-        const room = this.rooms.get(roomId);
-        if (!room || !room.state.videoPath || !existsSync(room.state.videoPath)) {
-            return DEFAULT_BITRATE_MBPS;
-        }
-
-        try {
-            const stats = statSync(room.state.videoPath);
-            const sizeBits = stats.size * 8;
-            // Assume 2 hours (7200s) duration as fallback if we don't know it
-            // Ideally, we'd store duration from metadata when upload finishes
-            const durationSeconds = 7200; 
-            const bitrateBps = sizeBits / durationSeconds;
-            const bitrateMbps = bitrateBps / 1_000_000;
-            
-            // Cap at sensible limits (e.g. min 2Mbps, max 50Mbps)
-            return Math.max(2, Math.min(bitrateMbps, 50));
-        } catch (e) {
-            logger.warn("RoomManager", `Error estimating bitrate for room ${roomId}`, e);
-            return DEFAULT_BITRATE_MBPS;
-        }
-    }
-
-    addClient(roomId: string, ws: ExtendedWebSocket): boolean {
-        const room = this.rooms.get(roomId);
-        if (!room) return false;
-
-        const existingTimer = this.cleanupTimers.get(roomId);
-        if (existingTimer) {
-            clearTimeout(existingTimer);
-            this.cleanupTimers.delete(roomId);
-        }
-
-        // 1. Check User Limit
-        if (room.clients.size >= MAX_CLIENTS_PER_ROOM) {
-            logger.warn("RoomManager", `Connection rejected: Room ${roomId} full (${room.clients.size}/${MAX_CLIENTS_PER_ROOM})`);
-            return false;
-        }
-
-        // 2. Check Bandwidth Limit
-        const estimatedBitrate = this.estimateBitrate(roomId);
-        const currentBandwidth = room.clients.size * estimatedBitrate;
-        
-        if (currentBandwidth + estimatedBitrate > MAX_BANDWIDTH_MBPS) {
-            logger.warn("RoomManager", `Connection rejected: Bandwidth limit exceeded for room ${roomId}. Estimated usage: ${currentBandwidth.toFixed(1)} + ${estimatedBitrate.toFixed(1)} > ${MAX_BANDWIDTH_MBPS} Mbps`);
-            return false;
-        }
-
-        room.clients.add(ws);
-        logger.debug("Room", `Cliente conectado. Room: ${roomId}, Total: ${room.clients.size}, Est. Bandwidth: ${(currentBandwidth + estimatedBitrate).toFixed(1)} Mbps`);
-        this.broadcastViewerCountDebounced(roomId);
-        return true;
-    }
-
-    removeClient(roomId: string, ws: ExtendedWebSocket): void {
-        const room = this.rooms.get(roomId);
-        if (!room) return;
-        room.clients.delete(ws);
-        logger.debug("Room", `Cliente desconectado. Room: ${roomId}, Total: ${room.clients.size}`);
-
-        if (ws.data.token) {
-            const stillConnected = Array.from(room.clients).some(
-                client => client.data.token === ws.data.token
-            );
-            if (!stillConnected) {
-                this.markUserDisconnected(roomId, ws.data.token);
-            }
-        }
-
-        if (room.clients.size === 0) {
-            this.scheduleRoomCleanup(roomId);
-        } else {
-            this.broadcastViewerCountDebounced(roomId);
-        }
-    }
-
-    private scheduleRoomCleanup(roomId: string): void {
-        const existing = this.cleanupTimers.get(roomId);
-        if (existing) clearTimeout(existing);
-
-        const timer = setTimeout(() => {
-            const room = this.rooms.get(roomId);
-            if (room && room.clients.size === 0) {
-                this.deleteRoom(roomId);
-            }
-            this.cleanupTimers.delete(roomId);
-        }, 30000);
-
-        this.cleanupTimers.set(roomId, timer);
-    }
-
-    public async deleteRoom(roomId: string): Promise<void> {
-        const room = this.rooms.get(roomId);
-        if (!room) return;
-        logger.info("RoomManager", `Removendo sala: ${roomId}`);
-
-        for (const client of room.clients) {
-            if (client.readyState === WebSocket.OPEN) {
-                client.close(1000, "Sala encerrada");
-            }
-        }
-        room.clients.clear();
-
-        const resolvedUploadsDir = resolve(UPLOADS_DIR);
-        const mediaPaths = [room.state.videoPath, room.state.pendingVideoPath].filter(Boolean);
-        const uniqueMediaPaths = Array.from(new Set(mediaPaths));
-
-        for (const mediaPath of uniqueMediaPaths) {
-            if (!existsSync(mediaPath)) continue;
-            const resolvedMediaPath = resolve(mediaPath);
-
-            if (!resolvedMediaPath.startsWith(resolvedUploadsDir)) {
-                logger.warn("RoomManager", `Skipping file deletion (external file): ${mediaPath}`);
-                continue;
-            }
-
-            try {
-                logger.debug("RoomManager", `Deleting media file: ${mediaPath}`);
-                await rm(mediaPath, { force: true });
-            } catch (e) {
-                logger.error("RoomManager", "Error deleting media file", e);
-            }
-        }
-
-        if (this.activeDiscordSession === roomId) {
-            this.activeDiscordSession = null;
-        }
-
-        this.rooms.delete(roomId);
-    }
-
-    private cleanupInactiveRooms(): void {
-        const now = Date.now();
-        for (const [roomId, room] of this.rooms) {
-            if (room.clients.size === 0 && now - room.state.lastUpdate > ROOM_TIMEOUT_MS) {
-                this.deleteRoom(roomId);
-            }
-        }
-    }
-
-    updateState(roomId: string, updates: Partial<RoomState>): void {
-        const room = this.rooms.get(roomId);
-        if (!room) return;
-        Object.assign(room.state, updates);
-        room.state.lastUpdate = Date.now();
-    }
-
-    updateHostHeartbeat(roomId: string): void {
-        const room = this.rooms.get(roomId);
-        if (!room) return;
-        room.state.hostLastHeartbeat = Date.now();
-    }
-
-    setLastCommandSeq(roomId: string, seq: number): void {
-        const room = this.rooms.get(roomId);
-        if (!room) return;
-        room.state.lastCommandSeq = seq;
-    }
-
-    getLastCommandSeq(roomId: string): number {
-        const room = this.rooms.get(roomId);
-        return room?.state.lastCommandSeq || 0;
-    }
-
-    forEachRoom(callback: (room: Room) => void): void {
-        for (const room of this.rooms.values()) {
-            callback(room);
-        }
-    }
-
-    getSyncInterval(roomId: string): number {
-        const room = this.rooms.get(roomId);
-        if (!room) return 5000;
-        return room.state.isPlaying ? 2000 : 5000;
-    }
-
-    broadcast(roomId: string, message: WSMessage | string, exclude?: ExtendedWebSocket): void {
-        const room = this.rooms.get(roomId);
-        if (!room) return;
-        
-        const data = typeof message === 'string' ? message : JSON.stringify(message);
-        
-        for (const client of room.clients) {
-            if (client !== exclude && client.readyState === WebSocket.OPEN) {
-                try {
-                    client.send(data);
-                } catch (e) {
-                    logger.error("RoomManager", "Failed to send to client", e);
-                }
-            }
-        }
-    }
-
-    broadcastAll(roomId: string, message: WSMessage | string): void {
-        const room = this.rooms.get(roomId);
-        if (!room) return;
-        
-        const data = typeof message === 'string' ? message : JSON.stringify(message);
-        
-        for (const client of room.clients) {
-            if (client.readyState === WebSocket.OPEN) {
-                try {
-                    client.send(data);
-                } catch (e) {
-                    logger.error("RoomManager", "Failed to send to client", e);
-                }
-            }
-        }
-    }
-
-    broadcastViewerCountDebounced(roomId: string): void {
-        const existing = this.viewerBroadcastTimeouts.get(roomId);
-        if (existing) clearTimeout(existing);
-
-        const timeout = setTimeout(() => {
-            this.broadcastViewerCount(roomId);
-            this.viewerBroadcastTimeouts.delete(roomId);
-        }, VIEWER_BROADCAST_DEBOUNCE);
-
-        this.viewerBroadcastTimeouts.set(roomId, timeout);
-    }
-
-    broadcastViewerCount(roomId: string): void {
-        const room = this.rooms.get(roomId);
-        if (!room) return;
-        const connectedUsers = this.getConnectedUsers(roomId);
-        const message = JSON.stringify({
-            type: "viewers",
-            count: connectedUsers.length,
-            viewers: connectedUsers.map(u => ({
-                discordId: u.discordId,
-                username: u.username,
-                ping: u.ping
-            }))
-        });
-        for (const client of room.clients) {
-            if (client.readyState === WebSocket.OPEN) {
-                try {
-                    client.send(message);
-                } catch (e) {
-                    logger.error("RoomManager", "Failed to send viewer count", e);
-                }
-            }
-        }
-    }
-
-
-    private generateId(): string {
-        return randomUUID();
-    }
-
-    private generateToken(): string {
-        return randomBytes(32).toString("base64url");
     }
 }
 
