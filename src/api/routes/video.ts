@@ -1,6 +1,8 @@
 import { Router } from "express";
 import { existsSync, statSync, createReadStream } from "fs";
 import { roomManager } from "../../core/room-manager";
+import { requireRoomAccess } from "../http/room-access";
+import { sendRouteError } from "../http/route-error";
 
 const VIDEO_CHUNK_SIZE = 4 * 1024 * 1024;
 
@@ -34,41 +36,51 @@ export function createVideoRouter(): Router {
     const router = Router();
 
     router.get("/:roomId", (req, res) => {
-        const { roomId } = req.params;
-        const room = roomManager.getRoom(roomId);
-        if (!room || !room.state.videoPath) {
-            res.status(404).send("Vídeo não encontrado");
-            return;
-        }
+        try {
+            const { roomId } = req.params;
+            const { room } = requireRoomAccess(roomManager, roomId, req);
+            if (!room.state.videoPath) {
+                res.status(404).send("Vídeo não encontrado");
+                return;
+            }
 
-        const videoPath = room.state.videoPath;
-        if (!existsSync(videoPath)) {
-            res.status(404).send("Vídeo não encontrado");
-            return;
-        }
+            const videoPath = room.state.videoPath;
+            if (!existsSync(videoPath)) {
+                res.status(404).send("Vídeo não encontrado");
+                return;
+            }
 
-        const stat = statSync(videoPath);
-        const fileSize = stat.size;
-        const range = req.headers.range;
+            const stat = statSync(videoPath);
+            const fileSize = stat.size;
+            const range = req.headers.range;
 
-        if (range) {
-            const parts = range.replace(/bytes=/, "").split("-");
-            const start = parseInt(parts[0], 10);
-            const requestedEnd = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
-            const end = Math.min(start + VIDEO_CHUNK_SIZE - 1, requestedEnd, fileSize - 1);
-            const chunkSize = end - start + 1;
+            if (range) {
+                const parts = range.replace(/bytes=/, "").split("-");
+                const start = Number.parseInt(parts[0], 10);
+                const requestedEnd = parts[1] ? Number.parseInt(parts[1], 10) : fileSize - 1;
 
-            const file = createReadStream(videoPath, { start, end });
-            res.writeHead(206, {
-                "Content-Range": `bytes ${start}-${end}/${fileSize}`,
-                "Accept-Ranges": "bytes",
-                "Content-Length": chunkSize,
-                "Content-Type": getMimeType(videoPath),
-                "Cache-Control": "no-cache",
-            });
-            file.pipe(res);
-            req.on("close", () => file.destroy());
-        } else {
+                if (!Number.isInteger(start) || start < 0 || start >= fileSize) {
+                    res.status(416).send("Range inválido");
+                    return;
+                }
+
+                const safeRequestedEnd = Number.isInteger(requestedEnd) ? requestedEnd : fileSize - 1;
+                const end = Math.min(start + VIDEO_CHUNK_SIZE - 1, safeRequestedEnd, fileSize - 1);
+                const chunkSize = end - start + 1;
+
+                const file = createReadStream(videoPath, { start, end });
+                res.writeHead(206, {
+                    "Content-Range": `bytes ${start}-${end}/${fileSize}`,
+                    "Accept-Ranges": "bytes",
+                    "Content-Length": chunkSize,
+                    "Content-Type": getMimeType(videoPath),
+                    "Cache-Control": "no-cache",
+                });
+                file.pipe(res);
+                req.on("close", () => file.destroy());
+                return;
+            }
+
             const file = createReadStream(videoPath);
             res.writeHead(200, {
                 "Content-Length": fileSize,
@@ -77,6 +89,8 @@ export function createVideoRouter(): Router {
             });
             file.pipe(res);
             req.on("close", () => file.destroy());
+        } catch (error) {
+            sendRouteError(res, error, "VideoRoute");
         }
     });
 

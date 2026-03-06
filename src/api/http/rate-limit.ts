@@ -1,4 +1,4 @@
-import express from "express";
+import type { NextFunction, Request, Response } from "express";
 
 const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
 const RATE_LIMIT = 120;
@@ -19,7 +19,7 @@ setInterval(() => {
     }
 }, 60000);
 
-export function rateLimit(req: express.Request, res: express.Response, next: express.NextFunction) {
+export function rateLimit(req: Request, res: Response, next: NextFunction) {
     const ip = req.ip || req.socket.remoteAddress || "unknown";
     const now = Date.now();
     const entry = rateLimitMap.get(ip);
@@ -39,7 +39,7 @@ export function rateLimit(req: express.Request, res: express.Response, next: exp
 }
 
 export function createRateLimit(options: RateLimitOptions) {
-    return (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    return (req: Request, res: Response, next: NextFunction) => {
         const ip = req.ip || req.socket.remoteAddress || "unknown";
         const key = `${options.key}:${ip}`;
         const now = Date.now();

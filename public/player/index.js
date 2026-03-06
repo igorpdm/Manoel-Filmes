@@ -1,5 +1,5 @@
 import { dom } from './dom.js';
-import { state, constants } from './state.js';
+import { buildRoomHeaders, state, constants } from './state.js';
 import {
     initSidebar,
     updateHostUI,
@@ -26,7 +26,9 @@ function log(...args) {
 
 async function fetchRoomInfo() {
     try {
-        const res = await fetch(`/api/room-info/${state.roomId}`);
+        const res = await fetch(`/api/room-info/${state.roomId}`, {
+            headers: buildRoomHeaders()
+        });
         if (res.ok) {
             const data = await res.json();
             dom.roomTitleEl.textContent = data.title;
@@ -66,7 +68,9 @@ async function fetchRoomInfo() {
 
 async function checkRoomStatus() {
     try {
-        const res = await fetch(`/api/room-status/${state.roomId}`);
+        const res = await fetch(`/api/room-status/${state.roomId}`, {
+            headers: buildRoomHeaders()
+        });
         const data = await res.json();
 
         if (data.hasVideo) {
@@ -303,19 +307,11 @@ function bindSessionModals() {
     dom.btnConfirmEnd.addEventListener('click', async () => {
         let failed = false;
         try {
-            if (state.userToken) {
-                await fetch(`/api/discord-end-session/${state.roomId}`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ token: state.userToken })
-                });
-            } else {
-                await fetch(`/api/end-session/${state.roomId}`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ hostId: state.clientId })
-                });
-            }
+            await fetch(`/api/discord-end-session/${state.roomId}`, {
+                method: 'POST',
+                headers: buildRoomHeaders({ 'Content-Type': 'application/json' }),
+                body: JSON.stringify({ token: state.userToken })
+            });
         } catch (e) {
             failed = true;
             const message = dom.modalConfirmEnd.querySelector('p');
@@ -432,7 +428,7 @@ function bindRatingModal() {
         try {
             const res = await fetch(`/api/session-rating/${state.roomId}`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: buildRoomHeaders({ 'Content-Type': 'application/json' }),
                 body: JSON.stringify({ token: state.userToken, rating: state.selectedRating })
             });
 

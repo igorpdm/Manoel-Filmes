@@ -1,5 +1,5 @@
 import { dom } from './dom.js';
-import { state, constants } from './state.js';
+import { buildRoomHeaders, state, constants } from './state.js';
 import {
     updateSyncStatus,
     updateHostUI,
@@ -132,7 +132,9 @@ function stopHostHeartbeat() {
 async function fetchUserDiscordId() {
     if (!state.userToken || state.currentDiscordId) return;
     try {
-        const res = await fetch(`/api/validate-token/${state.roomId}?token=${state.userToken}`);
+        const res = await fetch(`/api/validate-token/${state.roomId}?token=${state.userToken}`, {
+            headers: buildRoomHeaders()
+        });
         if (res.ok) {
             const data = await res.json();
             state.currentDiscordId = data.discordId;
@@ -260,7 +262,12 @@ function handleMessage(data) {
 }
 
 export function connectWebSocket() {
-    const wsUrl = `${state.wsProtocol}//${window.location.host}/ws?room=${state.roomId}&clientId=${state.clientId}${state.userToken ? `&token=${state.userToken}` : ''}`;
+    if (!state.userToken) {
+        updateSyncStatus('error', 'Token de acesso ausente');
+        return;
+    }
+
+    const wsUrl = `${state.wsProtocol}//${window.location.host}/ws?room=${state.roomId}&clientId=${state.clientId}&token=${encodeURIComponent(state.userToken)}`;
     state.ws = new WebSocket(wsUrl);
 
     state.ws.onopen = () => {

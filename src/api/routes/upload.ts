@@ -8,6 +8,7 @@ import { logger } from "../../shared/logger";
 import type { UploadDeps, UploadMeta } from "./upload-types";
 import type { AudioTrackInfo } from "../../shared/types";
 import { getAuthFromRequest, ensureUploadAuthorized } from "./upload-auth";
+import { requireRoomAccess } from "../http/room-access";
 import {
   decodeSubtitleBuffer,
   getPartPath,
@@ -905,22 +906,25 @@ export function createUploadRouter(deps: UploadDeps): Router {
   });
 
   router.get("/subtitles/:roomId", (req, res) => {
-    const roomId = req.params.roomId as string;
-    const room = deps.roomManager.getRoom(roomId);
-    if (!room) {
-      res.status(404).json({ error: "Sala não encontrada" });
-      return;
+    try {
+      const roomId = req.params.roomId as string;
+      requireRoomAccess(deps.roomManager, roomId, req);
+      const subtitles = deps.roomManager.getSubtitles(roomId);
+      res.json({ subtitles });
+    } catch (error) {
+      logger.error("UploadRoute", "Falha ao listar legendas", error);
+      res.status(403).json({ error: "Sem permissão para acessar legendas" });
     }
-
-    const subtitles = deps.roomManager.getSubtitles(roomId);
-    res.json({ subtitles });
   });
 
   router.get("/subtitle/:roomId/:filename", async (req, res) => {
     const roomId = req.params.roomId as string;
-    const room = deps.roomManager.getRoom(roomId);
-    if (!room) {
-      res.status(404).json({ error: "Sala não encontrada" });
+
+    try {
+      requireRoomAccess(deps.roomManager, roomId, req);
+    } catch (error) {
+      logger.error("UploadRoute", "Falha ao carregar legenda", error);
+      res.status(403).json({ error: "Sem permissão para acessar legenda" });
       return;
     }
 

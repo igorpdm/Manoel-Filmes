@@ -5,6 +5,7 @@ import { roomManager } from "../../core/room-manager";
 import { cleanupRoomUploads } from "./upload";
 import { buildSessionStatusData } from "../services/session-status";
 import { sendRouteError } from "../http/route-error";
+import { requireRoomAccess } from "../http/room-access";
 import {
     ConflictHttpError,
     ForbiddenHttpError,
@@ -109,20 +110,20 @@ export function createRoomRouter(): Router {
     });
 
     router.get("/room-info/:roomId", (req, res) => {
-        const { roomId } = req.params;
-        const room = roomManager.getRoom(roomId);
-        if (!room) {
-            res.status(404).json({ error: "Sala não encontrada" });
-            return;
+        try {
+            const { roomId } = req.params;
+            const { room } = requireRoomAccess(roomManager, roomId, req);
+            const connectedUsers = roomManager.getConnectedUsers(roomId);
+            res.json({
+                title: room.title || "Sessão",
+                movieName: room.movieName || "Filme",
+                viewerCount: connectedUsers.length,
+                movieInfo: room.movieInfo || null,
+                selectedEpisode: room.selectedEpisode || null,
+            });
+        } catch (error) {
+            sendRouteError(res, error, "APIServer");
         }
-        const connectedUsers = roomManager.getConnectedUsers(roomId);
-        res.json({
-            title: room.title || "Sessão",
-            movieName: room.movieName || "Filme",
-            viewerCount: connectedUsers.length,
-            movieInfo: room.movieInfo || null,
-            selectedEpisode: room.selectedEpisode || null,
-        });
     });
 
     router.post("/end-session/:roomId", async (req, res) => {
@@ -150,22 +151,22 @@ export function createRoomRouter(): Router {
     });
 
     router.get("/room-status/:roomId", (req, res) => {
-        const { roomId } = req.params;
-        const room = roomManager.getRoom(roomId);
-        if (!room) {
-            res.status(404).json({ error: "Sala não encontrada" });
-            return;
+        try {
+            const { roomId } = req.params;
+            const { room } = requireRoomAccess(roomManager, roomId, req);
+            res.json({
+                hasVideo: room.state.videoPath !== "",
+                isUploading: room.state.isUploading,
+                uploadProgress: room.state.uploadProgress,
+                isAwaitingAudioSelection: room.state.isAwaitingAudioSelection,
+                audioTracks: room.state.audioTracks,
+                audioSelectionErrorMessage: room.state.audioSelectionErrorMessage || "",
+                isProcessing: room.state.isProcessing,
+                processingMessage: room.state.processingMessage,
+            });
+        } catch (error) {
+            sendRouteError(res, error, "APIServer");
         }
-        res.json({
-            hasVideo: room.state.videoPath !== "",
-            isUploading: room.state.isUploading,
-            uploadProgress: room.state.uploadProgress,
-            isAwaitingAudioSelection: room.state.isAwaitingAudioSelection,
-            audioTracks: room.state.audioTracks,
-            audioSelectionErrorMessage: room.state.audioSelectionErrorMessage || "",
-            isProcessing: room.state.isProcessing,
-            processingMessage: room.state.processingMessage,
-        });
     });
 
     return router;

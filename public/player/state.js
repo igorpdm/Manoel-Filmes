@@ -1,7 +1,36 @@
 const roomId = window.location.pathname.split('/')[2];
 const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-const clientId = localStorage.getItem(`host_${roomId}`) || '';
 const userToken = new URLSearchParams(window.location.search).get('token') || '';
+
+function createClientId() {
+    if (window.crypto?.randomUUID) {
+        return window.crypto.randomUUID();
+    }
+
+    return `client-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+const clientId = createClientId();
+
+export function buildRoomHeaders(extraHeaders = {}) {
+    if (!userToken) {
+        return { ...extraHeaders };
+    }
+
+    return {
+        ...extraHeaders,
+        'x-room-token': userToken
+    };
+}
+
+export function buildRoomUrl(path) {
+    if (!userToken) {
+        return path;
+    }
+
+    const separator = path.includes('?') ? '&' : '?';
+    return `${path}${separator}token=${encodeURIComponent(userToken)}`;
+}
 
 export const constants = {
     REMOTE_COOLDOWN: 500,

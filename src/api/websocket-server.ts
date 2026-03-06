@@ -122,22 +122,30 @@ export function setupWebSocketServer(wss: WebSocketServer, server: Server): void
         const clientId = url.searchParams.get("clientId") || "";
         const token = url.searchParams.get("token") || "";
 
-        if (!roomId || !roomManager.getRoom(roomId)) {
+        if (!roomId) {
             socket.write("HTTP/1.1 404 Not Found\r\n\r\n");
             socket.destroy();
             return;
         }
 
         const room = roomManager.getRoom(roomId);
-        let discordUser = null;
+        if (!room || !room.discordSession) {
+            socket.write("HTTP/1.1 404 Not Found\r\n\r\n");
+            socket.destroy();
+            return;
+        }
 
-        if (room?.discordSession && token) {
-            discordUser = roomManager.validateToken(roomId, token);
-            if (!discordUser) {
-                socket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
-                socket.destroy();
-                return;
-            }
+        if (!token) {
+            socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
+            socket.destroy();
+            return;
+        }
+
+        const discordUser = roomManager.validateToken(roomId, token);
+        if (!discordUser) {
+            socket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
+            socket.destroy();
+            return;
         }
 
         wss.handleUpgrade(request, socket, head, (ws) => {
@@ -154,11 +162,8 @@ export function setupWebSocketServer(wss: WebSocketServer, server: Server): void
         ws.isAlive = true;
         ws.on("pong", () => { ws.isAlive = true; });
 
-        let isHost = roomManager.isHost(roomId, clientId);
-        if (token) {
-            roomManager.markUserConnected(roomId, token);
-            isHost = roomManager.isHostByToken(roomId, token);
-        }
+        roomManager.markUserConnected(roomId, token);
+        const isHost = roomManager.isHostByToken(roomId, token);
 
         const added = roomManager.addClient(roomId, ws);
         if (!added) {

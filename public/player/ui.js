@@ -1,5 +1,5 @@
 import { dom } from './dom.js';
-import { state } from './state.js';
+import { buildRoomUrl, state } from './state.js';
 import { formatTime } from './utils.js';
 
 export function initSidebar() {
@@ -163,7 +163,7 @@ export function showPlayer() {
     state.hasVideo = true;
 
     if (!dom.video.src.includes(`/video/${state.roomId}`)) {
-        dom.video.src = `/video/${state.roomId}?t=${Date.now()}`;
+        dom.video.src = buildRoomUrl(`/video/${state.roomId}?t=${Date.now()}`);
         dom.video.preload = 'auto';
         dom.video.load();
     }

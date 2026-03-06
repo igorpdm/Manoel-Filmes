@@ -1,5 +1,5 @@
 import { dom } from './dom.js';
-import { state } from './state.js';
+import { buildRoomHeaders, state } from './state.js';
 
 const STORAGE_KEY = 'manoel_subtitle_settings';
 
@@ -141,7 +141,9 @@ export async function loadSubtitle(filename) {
     }
 
     try {
-        const res = await fetch(`/api/upload/subtitle/${state.roomId}/${filename}`);
+        const res = await fetch(`/api/upload/subtitle/${state.roomId}/${filename}`, {
+            headers: buildRoomHeaders()
+        });
         if (!res.ok) throw new Error('Failed to load subtitle');
 
         const content = await res.text();
@@ -158,7 +160,9 @@ export async function loadSubtitle(filename) {
 
 export async function fetchAvailableSubtitles() {
     try {
-        const res = await fetch(`/api/upload/subtitles/${state.roomId}`);
+        const res = await fetch(`/api/upload/subtitles/${state.roomId}`, {
+            headers: buildRoomHeaders()
+        });
         if (!res.ok) return [];
         const data = await res.json();
         state.availableSubtitles = data.subtitles || [];
@@ -169,10 +173,7 @@ export async function fetchAvailableSubtitles() {
 }
 
 export async function uploadSubtitleFile(file) {
-    const headers = {};
-    if (state.userToken) headers['x-room-token'] = state.userToken;
-    if (state.clientId) headers['x-host-id'] = state.clientId;
-    headers['x-filename'] = file.name;
+    const headers = buildRoomHeaders({ 'x-filename': file.name });
 
     const res = await fetch(`/api/upload/subtitle/${state.roomId}`, {
         method: 'POST',
