@@ -413,7 +413,7 @@ export function createUploadRouter(deps: UploadDeps): Router {
     }
 
     const auth = getAuthFromRequest(req);
-    const authError = ensureUploadAuthorized(roomId, auth.token, auth.hostId, deps);
+    const authError = ensureUploadAuthorized(roomId, auth.token, deps);
     if (authError) { res.status(authError.status).json({ error: authError.error }); return; }
 
     const chunksDir = join(deps.uploadsDir, uploadId);
@@ -457,7 +457,7 @@ export function createUploadRouter(deps: UploadDeps): Router {
     }
 
     const auth = getAuthFromRequest(req);
-    const authError = ensureUploadAuthorized(roomId, auth.token, auth.hostId, deps);
+    const authError = ensureUploadAuthorized(roomId, auth.token, deps);
     if (authError) { res.status(authError.status).json({ error: authError.error }); return; }
 
     const chunksDir = join(deps.uploadsDir, uploadId);
@@ -486,7 +486,7 @@ export function createUploadRouter(deps: UploadDeps): Router {
 
     const body = req.body;
     const auth = getAuthFromRequest(req, body);
-    const authError = ensureUploadAuthorized(roomId, auth.token, auth.hostId, deps);
+    const authError = ensureUploadAuthorized(roomId, auth.token, deps);
     if (authError) { res.status(authError.status).json({ error: authError.error }); return; }
 
     if (room.state.isProcessing || room.state.isAwaitingAudioSelection) {
@@ -569,7 +569,7 @@ export function createUploadRouter(deps: UploadDeps): Router {
     }
 
     const auth = getAuthFromRequest(req);
-    const authError = ensureUploadAuthorized(roomId, auth.token, auth.hostId, deps);
+    const authError = ensureUploadAuthorized(roomId, auth.token, deps);
     if (authError) { res.status(authError.status).json({ error: authError.error }); return; }
 
     const chunksDir = join(deps.uploadsDir, uploadId);
@@ -644,7 +644,7 @@ export function createUploadRouter(deps: UploadDeps): Router {
 
     const body = req.body;
     const auth = getAuthFromRequest(req, body);
-    const authError = ensureUploadAuthorized(roomId, auth.token, auth.hostId, deps);
+    const authError = ensureUploadAuthorized(roomId, auth.token, deps);
     if (authError) { res.status(authError.status).json({ error: authError.error }); return; }
 
     const { filename, totalChunks } = body;
@@ -724,7 +724,7 @@ export function createUploadRouter(deps: UploadDeps): Router {
     }
 
     const auth = getAuthFromRequest(req, req.body);
-    const authError = ensureUploadAuthorized(roomId, auth.token, auth.hostId, deps);
+    const authError = ensureUploadAuthorized(roomId, auth.token, deps);
     if (authError) { res.status(authError.status).json({ error: authError.error }); return; }
 
     if (room.state.isProcessing) {
@@ -767,7 +767,7 @@ export function createUploadRouter(deps: UploadDeps): Router {
     }
 
     const auth = getAuthFromRequest(req, req.body);
-    const authError = ensureUploadAuthorized(roomId, auth.token, auth.hostId, deps);
+    const authError = ensureUploadAuthorized(roomId, auth.token, deps);
     if (authError) {
       res.status(authError.status).json({ error: authError.error });
       return;
@@ -832,7 +832,7 @@ export function createUploadRouter(deps: UploadDeps): Router {
 
     const body = req.body;
     const auth = getAuthFromRequest(req, body);
-    const authError = ensureUploadAuthorized(roomId, auth.token, auth.hostId, deps);
+    const authError = ensureUploadAuthorized(roomId, auth.token, deps);
     if (authError) { res.status(authError.status).json({ error: authError.error }); return; }
 
     const { uploadId } = body;
@@ -875,7 +875,7 @@ export function createUploadRouter(deps: UploadDeps): Router {
     }
 
     const auth = getAuthFromRequest(req);
-    const authError = ensureUploadAuthorized(roomId, auth.token, auth.hostId, deps);
+    const authError = ensureUploadAuthorized(roomId, auth.token, deps);
     if (authError) { res.status(authError.status).json({ error: authError.error }); return; }
 
     const subtitlesDir = getSubtitlesDir(deps.uploadsDir, roomId);
@@ -962,7 +962,7 @@ export function createUploadRouter(deps: UploadDeps): Router {
     }
 
     const auth = getAuthFromRequest(req);
-    const authError = ensureUploadAuthorized(roomId, auth.token, auth.hostId, deps);
+    const authError = ensureUploadAuthorized(roomId, auth.token, deps);
     if (authError) { res.status(authError.status).json({ error: authError.error }); return; }
 
     const subtitlesDir = getSubtitlesDir(deps.uploadsDir, roomId);

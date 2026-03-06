@@ -34,7 +34,6 @@ export interface RoomState {
     audioSelectionErrorMessage?: string;
     isProcessing: boolean;
     processingMessage?: string;
-    hostId: string;
     playbackStarted: boolean;
     hostLastHeartbeat: number;
     lastCommandSeq: number;

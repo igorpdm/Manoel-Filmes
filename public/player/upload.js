@@ -1,5 +1,5 @@
 import { dom } from './dom.js';
-import { state, constants } from './state.js';
+import { buildRoomHeaders, state, constants } from './state.js';
 import { formatBytes, formatEta } from './utils.js';
 import { showUploadProgress, showAudioTrackSelection, showProcessingProgress, updateUploadProgress, updateHostUI } from './ui.js';
 
@@ -10,10 +10,7 @@ function log(...args) {
 }
 
 function buildAuthHeaders() {
-    const headers = {};
-    if (state.userToken) headers['x-room-token'] = state.userToken;
-    if (state.clientId) headers['x-host-id'] = state.clientId;
-    return headers;
+    return buildRoomHeaders();
 }
 
 function sanitizeFilename(name) {

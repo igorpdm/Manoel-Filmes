@@ -52,13 +52,6 @@ export class RoomManager {
 
     // ─── Room Lifecycle ───────────────────────────────────────────────────────
 
-    createRoom(videoPath?: string): string {
-        const id = randomUUID();
-        this.rooms.set(id, this.buildRoom(id, videoPath));
-        logger.info("RoomManager", `Sala simples criada: ${id}`);
-        return id;
-    }
-
     createDiscordSession(
         title: string,
         movieName: string,
@@ -71,7 +64,6 @@ export class RoomManager {
 
         const roomId = randomUUID();
         const hostToken = auth.generateToken();
-        const hostId = randomUUID();
 
         const hostUser: DiscordUser = {
             discordId: discordSession.hostDiscordId,
@@ -91,7 +83,6 @@ export class RoomManager {
             discordSession,
             tokenMap: new Map([[hostToken, hostUser]])
         };
-        room.state.hostId = hostId;
 
         this.rooms.set(roomId, room);
         this.activeDiscordSession = roomId;
@@ -237,14 +228,6 @@ export class RoomManager {
     updateUserMetrics(roomId: string, token: string, metrics: ClientMetrics): void {
         const room = this.rooms.get(roomId);
         if (room) auth.updateUserMetrics(room, token, metrics);
-    }
-
-    getHostId(roomId: string): string {
-        return this.rooms.get(roomId)?.state.hostId ?? '';
-    }
-
-    isHost(roomId: string, clientId: string): boolean {
-        return this.rooms.get(roomId)?.state.hostId === clientId;
     }
 
     isHostByToken(roomId: string, token: string): boolean {
@@ -413,7 +396,6 @@ export class RoomManager {
                 audioSelectionErrorMessage: '',
                 isProcessing: false,
                 processingMessage: '',
-                hostId: randomUUID(),
                 playbackStarted: false,
                 hostLastHeartbeat: Date.now(),
                 lastCommandSeq: 0,
