@@ -1,7 +1,14 @@
 import type { DiscordSession, MovieInfo, SelectedEpisode, SessionRating } from "../../shared/types";
+import { PLAYER_API_SHARED_SECRET } from "../../config";
 import { logger } from "../../shared/logger";
 
 const PLAYER_BASE_URL = process.env.PLAYER_URL || "http://localhost:3000";
+
+function buildServiceHeaders(): Record<string, string> {
+    return {
+        "x-player-service-secret": PLAYER_API_SHARED_SECRET,
+    };
+}
 
 interface CreateSessionData {
     title: string;
@@ -50,7 +57,7 @@ export async function createDiscordSession(data: CreateSessionData): Promise<Ses
     try {
         const response = await fetch(`${PLAYER_BASE_URL}/api/discord-session`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: { "Content-Type": "application/json", ...buildServiceHeaders() },
             body: JSON.stringify(data),
         });
 
@@ -82,7 +89,7 @@ export async function generateUserToken(
     try {
         const response = await fetch(`${PLAYER_BASE_URL}/api/session-token/${roomId}`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: { "Content-Type": "application/json", ...buildServiceHeaders() },
             body: JSON.stringify({ discordId, username }),
         });
 
@@ -102,9 +109,11 @@ export async function generateUserToken(
  * @param roomId Identificador da sala.
  * @returns Status da sessão quando encontrado; null caso contrário.
  */
-export async function getSessionStatus(roomId: string): Promise<SessionStatus | null> {
+export async function getSessionStatus(roomId: string, token: string): Promise<SessionStatus | null> {
     try {
-        const response = await fetch(`${PLAYER_BASE_URL}/api/session-status/${roomId}`);
+        const response = await fetch(`${PLAYER_BASE_URL}/api/session-status/${roomId}`, {
+            headers: { "x-room-token": token },
+        });
 
         if (!response.ok) {
             return null;

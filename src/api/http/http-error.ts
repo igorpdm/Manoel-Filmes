@@ -1,4 +1,5 @@
 export type HttpErrorCode =
+  | "unauthorized"
   | "validation_error"
   | "not_found"
   | "forbidden"
@@ -21,6 +22,12 @@ export class HttpError extends Error {
 export class ValidationHttpError extends HttpError {
   constructor(message: string, details?: unknown) {
     super(400, "validation_error", message, details);
+  }
+}
+
+export class UnauthorizedHttpError extends HttpError {
+  constructor(message: string, details?: unknown) {
+    super(401, "unauthorized", message, details);
   }
 }
 

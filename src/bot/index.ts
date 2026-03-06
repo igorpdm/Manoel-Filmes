@@ -1,6 +1,6 @@
 import client from "./client";
 import db from "../database";
-import { DISCORD_TOKEN, GEMINI_API_KEY, TMDB_API_KEY } from "../config";
+import { DISCORD_TOKEN, GEMINI_API_KEY, PLAYER_API_SHARED_SECRET, TMDB_API_KEY } from "../config";
 import { registerCommands } from "./commands";
 import { registerInteractionHandlers } from "./interactions";
 import { buildMovieVoteEmbed } from "./ui/embeds";
@@ -68,8 +68,8 @@ client.once("clientReady", async () => {
 
 registerInteractionHandlers(client);
 
-if (!DISCORD_TOKEN || !GEMINI_API_KEY || !TMDB_API_KEY) {
-  throw new Error("Variáveis de ambiente ausentes. Verifique DISCORD_TOKEN, GEMINI_API_KEY e TMDB_API_KEY.");
+if (!DISCORD_TOKEN || !GEMINI_API_KEY || !TMDB_API_KEY || !PLAYER_API_SHARED_SECRET) {
+  throw new Error("Variáveis de ambiente ausentes. Verifique DISCORD_TOKEN, GEMINI_API_KEY, TMDB_API_KEY e PLAYER_API_SHARED_SECRET.");
 }
 
 client.login(DISCORD_TOKEN);

@@ -19,6 +19,7 @@ import {
     PUBLIC_DIR,
     UPLOADS_DIR,
     IS_PROD,
+    PLAYER_API_SHARED_SECRET,
     TMDB_API_KEY,
     TMDB_BASE_URL,
     TMDB_IMAGE_BASE,
@@ -28,6 +29,10 @@ if (!TMDB_API_KEY) {
     logger.warn("Config", "⚠️  TMDB_API_KEY não encontrada! Verifique seu arquivo .env");
 } else {
     logger.success("Config", "✅ TMDB API Key carregada com sucesso");
+}
+
+if (!PLAYER_API_SHARED_SECRET) {
+    throw new Error("PLAYER_API_SHARED_SECRET ausente. Verifique seu arquivo .env");
 }
 
 if (!existsSync(UPLOADS_DIR)) {
@@ -53,8 +58,8 @@ app.use("/api/upload", createUploadRouter({ roomManager, uploadsDir: UPLOADS_DIR
 app.use("/api", createRoomRouter());
 app.use("/video", createVideoRouter());
 
-app.use(express.static(PUBLIC_DIR));
 app.use(createStaticRouter());
+app.use(express.static(PUBLIC_DIR));
 
 setupWebSocketServer(wss, server);
 

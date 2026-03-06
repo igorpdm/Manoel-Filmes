@@ -12,6 +12,7 @@ export const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
 export const DISCORD_CLIENT_ID = process.env.DISCORD_CLIENT_ID;
 export const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 export const TMDB_API_KEY = process.env.TMDB_API_KEY;
+export const PLAYER_API_SHARED_SECRET = process.env.PLAYER_API_SHARED_SECRET || "";
 export const TMDB_BASE_URL = "https://api.themoviedb.org/3";
 export const TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p/w500";
 export const ADMIN_USER_ID = process.env.ADMIN_USER_ID || "";

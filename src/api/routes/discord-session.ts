@@ -5,6 +5,9 @@ import type { DiscordSession, MovieInfo, SelectedEpisode } from "../../shared/ty
 import type { SessionStatusData } from "../services/session-status";
 import { logger } from "../../shared/logger";
 import { sendRouteError } from "../http/route-error";
+import { requireRoomAccess } from "../http/room-access";
+import { createRateLimit } from "../http/rate-limit";
+import { requireTrustedService } from "../http/service-auth";
 import {
   ConflictHttpError,
   ForbiddenHttpError,
@@ -18,6 +21,10 @@ interface DiscordSessionDeps {
   getSessionStatusData: (roomId: string) => SessionStatusData | null;
   uploadsDir: string;
 }
+
+const createSessionRateLimit = createRateLimit({ key: "discord-session-create", limit: 15, windowMs: 60000 });
+const issueTokenRateLimit = createRateLimit({ key: "discord-session-token", limit: 30, windowMs: 60000 });
+const validateTokenRateLimit = createRateLimit({ key: "discord-session-validate", limit: 60, windowMs: 60000 });
 
 interface CreateDiscordSessionPayload {
   title: string;
@@ -144,8 +151,10 @@ function ensureHostToken(deps: DiscordSessionDeps, roomId: string, token: string
 export function createDiscordSessionRouter(deps: DiscordSessionDeps): Router {
   const router = Router();
 
-  router.post("/discord-session", async (req, res) => {
+  router.post("/discord-session", createSessionRateLimit, async (req, res) => {
     try {
+      requireTrustedService(req);
+
       if (deps.roomManager.hasAnyRooms() || deps.roomManager.hasActiveDiscordSession()) {
         throw new ConflictHttpError("Já existe uma sessão ativa");
       }
@@ -178,8 +187,10 @@ export function createDiscordSessionRouter(deps: DiscordSessionDeps): Router {
     }
   });
 
-  router.post("/session-token/:roomId", async (req, res) => {
+  router.post("/session-token/:roomId", issueTokenRateLimit, async (req, res) => {
     try {
+      requireTrustedService(req);
+
       const { roomId } = req.params;
       ensureSessionRoom(deps, roomId);
 
@@ -198,7 +209,7 @@ export function createDiscordSessionRouter(deps: DiscordSessionDeps): Router {
     }
   });
 
-  router.get("/validate-token/:roomId", (req, res) => {
+  router.get("/validate-token/:roomId", validateTokenRateLimit, (req, res) => {
     try {
       const { roomId } = req.params;
       const token = parseTokenFromQuery(req.query.token);
@@ -221,6 +232,7 @@ export function createDiscordSessionRouter(deps: DiscordSessionDeps): Router {
   router.get("/session-status/:roomId", (req, res) => {
     try {
       const { roomId } = req.params;
+      requireRoomAccess(deps.roomManager, roomId, req);
       const data = deps.getSessionStatusData(roomId);
       if (!data) {
         throw new NotFoundHttpError("Sessão não encontrada");

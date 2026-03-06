@@ -4,6 +4,12 @@ const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
 const RATE_LIMIT = 120;
 const RATE_WINDOW = 60000;
 
+interface RateLimitOptions {
+    key: string;
+    limit: number;
+    windowMs: number;
+}
+
 setInterval(() => {
     const now = Date.now();
     for (const [ip, entry] of rateLimitMap) {
@@ -30,4 +36,27 @@ export function rateLimit(req: express.Request, res: express.Response, next: exp
 
     entry.count++;
     next();
+}
+
+export function createRateLimit(options: RateLimitOptions) {
+    return (req: express.Request, res: express.Response, next: express.NextFunction) => {
+        const ip = req.ip || req.socket.remoteAddress || "unknown";
+        const key = `${options.key}:${ip}`;
+        const now = Date.now();
+        const entry = rateLimitMap.get(key);
+
+        if (!entry || now > entry.resetTime) {
+            rateLimitMap.set(key, { count: 1, resetTime: now + options.windowMs });
+            next();
+            return;
+        }
+
+        if (entry.count >= options.limit) {
+            res.status(429).json({ error: "Too many requests" });
+            return;
+        }
+
+        entry.count++;
+        next();
+    };
 }
