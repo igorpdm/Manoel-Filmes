@@ -126,57 +126,85 @@ export class MediaProcessor {
                 await mkdir(subtitlesDir, { recursive: true });
             }
 
-            for (const stream of textStreams) {
-                if (stream.index === undefined) continue;
+            const subtitleOutputs = textStreams
+                .filter((stream) => stream.index !== undefined)
+                .map((stream) => {
+                    const lang = stream.tags?.language || 'und';
+                    const rawTitle = stream.tags?.title || '';
+                    const title = rawTitle ? rawTitle.replace(/\s+/g, '_') : '';
+                    const isForced = stream.disposition?.forced === 1 || title.toLowerCase().includes('forced');
+                    const outputFilename = `${roomId}_sub_${stream.index}_${this.sanitizeFilename(lang)}.srt`;
 
-                const lang = stream.tags?.language || 'und';
-                const rawTitle = stream.tags?.title || '';
-                const title = rawTitle ? rawTitle.replace(/\s+/g, '_') : '';
-                const isForced = stream.disposition?.forced === 1 || title.toLowerCase().includes('forced');
-                
-                // Simplify filename to avoid FS issues: roomId_index_lang.srt
-                const outputFilename = `${roomId}_sub_${stream.index}_${this.sanitizeFilename(lang)}.srt`;
-                const outputPath = join(subtitlesDir, outputFilename);
+                    return {
+                        streamIndex: stream.index as number,
+                        lang,
+                        title,
+                        isForced,
+                        outputFilename,
+                        outputPath: join(subtitlesDir, outputFilename),
+                    };
+                });
 
-                this.notifyProgress(roomId, `Extraindo legenda (${lang})...`);
-                
-                try {
-                    await new Promise<void>((resolve, reject) => {
-                        const args = [
-                            '-nostdin',
-                            '-i', filePath,
-                            '-map', `0:${stream.index}`,
-                            '-c:s', 'srt',
-                            '-y',
-                            '-hide_banner',
-                            '-loglevel', 'error',
-                            outputPath
-                        ];
-                        
-                        logger.debug("MediaProcessor", `Spawn FFmpeg: ffmpeg ${args.join(' ')}`);
+            if (subtitleOutputs.length === 0) {
+                return;
+            }
 
-                        const proc = spawn('ffmpeg', args);
+            this.notifyProgress(roomId, `Extraindo ${subtitleOutputs.length} legenda(s)...`);
 
-                        let stderr = '';
-                        proc.stderr.on('data', (d) => stderr += d.toString());
+            const args = [
+                '-nostdin',
+                '-i', filePath,
+                '-y',
+                '-hide_banner',
+                '-loglevel', 'error',
+            ];
 
-                        proc.on('close', (code) => {
-                            if (code === 0) resolve();
-                            else reject(new Error(`FFmpeg exited with code ${code}: ${stderr}`));
-                        });
-                        
-                        proc.on('error', (err) => reject(err));
+            for (const subtitleOutput of subtitleOutputs) {
+                args.push(
+                    '-map', `0:${subtitleOutput.streamIndex}`,
+                    '-c:s', 'srt',
+                    subtitleOutput.outputPath,
+                );
+            }
+
+            logger.debug("MediaProcessor", `Spawn FFmpeg: ffmpeg ${args.join(' ')}`);
+
+            try {
+                await new Promise<void>((resolve, reject) => {
+                    const proc = spawn('ffmpeg', args);
+
+                    let stderr = '';
+                    proc.stderr.on('data', (d) => stderr += d.toString());
+
+                    proc.on('close', (code) => {
+                        if (code === 0) {
+                            resolve();
+                            return;
+                        }
+
+                        reject(new Error(`FFmpeg exited with code ${code}: ${stderr}`));
                     });
 
-                    if (existsSync(outputPath)) {
-                        // Add to room manager
-                        const displayName = `${lang.toUpperCase()} ${title ? `(${title})` : ''} ${isForced ? '[Forced]' : ''}`.trim();
-                        this.roomManager.addSubtitle(roomId, outputFilename, displayName);
+                    proc.on('error', (err) => reject(err));
+                });
+
+                for (const subtitleOutput of subtitleOutputs) {
+                    if (!existsSync(subtitleOutput.outputPath)) {
+                        logger.warn("MediaProcessor", `Legenda ${subtitleOutput.streamIndex} não foi gerada`);
+                        continue;
                     }
-                } catch (err) {
-                    logger.error("MediaProcessor", `Erro extraindo legenda ${stream.index}`, err);
-                    if (existsSync(outputPath)) await unlink(outputPath).catch(() => {});
+
+                    const displayName = `${subtitleOutput.lang.toUpperCase()} ${subtitleOutput.title ? `(${subtitleOutput.title})` : ''} ${subtitleOutput.isForced ? '[Forced]' : ''}`.trim();
+                    this.roomManager.addSubtitle(roomId, subtitleOutput.outputFilename, displayName);
                 }
+            } catch (error) {
+                for (const subtitleOutput of subtitleOutputs) {
+                    if (existsSync(subtitleOutput.outputPath)) {
+                        await unlink(subtitleOutput.outputPath).catch(() => {});
+                    }
+                }
+
+                logger.error("MediaProcessor", "Erro extraindo legendas", error);
             }
 
         } catch (error) {
