@@ -23,6 +23,8 @@ export class MediaProcessor {
         'hdmv_pgs_subtitle', 'dvd_subtitle', 'dvb_subtitle', 'xsub'
     ]);
     private static COMPATIBLE_AUDIO_CODECS = new Set(['aac', 'mp3']);
+    private static FFPROBE_CACHE_TTL_MS = 5 * 60 * 1000;
+    private static ffprobeCache = new Map<string, { data: ffmpeg.FfprobeData; expiresAt: number }>();
 
     constructor(private roomManager: typeof RoomManager.prototype) {}
 
@@ -65,6 +67,31 @@ export class MediaProcessor {
         const normalized = name.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
         // Replace non-alphanumeric (except dots, dashes, underscores) with underscores
         return normalized.replace(/[^a-zA-Z0-9._-]/g, "_");
+    }
+
+    private getCachedFfprobe(filePath: string): ffmpeg.FfprobeData | null {
+        const cached = MediaProcessor.ffprobeCache.get(filePath);
+        if (!cached) {
+            return null;
+        }
+
+        if (cached.expiresAt <= Date.now()) {
+            MediaProcessor.ffprobeCache.delete(filePath);
+            return null;
+        }
+
+        return cached.data;
+    }
+
+    private setCachedFfprobe(filePath: string, data: ffmpeg.FfprobeData): void {
+        MediaProcessor.ffprobeCache.set(filePath, {
+            data,
+            expiresAt: Date.now() + MediaProcessor.FFPROBE_CACHE_TTL_MS,
+        });
+    }
+
+    private clearCachedFfprobe(filePath: string): void {
+        MediaProcessor.ffprobeCache.delete(filePath);
     }
 
     private async extractSubtitles(roomId: string, filePath: string): Promise<void> {
@@ -242,19 +269,23 @@ export class MediaProcessor {
             });
 
             if (existsSync(filePath)) {
+                this.clearCachedFfprobe(filePath);
                 await unlink(filePath);
             }
 
             const finalPath = join(dir, `${name}.mp4`);
             if (existsSync(finalPath)) {
+                this.clearCachedFfprobe(finalPath);
                 await unlink(finalPath);
             }
             await rename(tempPath, finalPath);
+            this.clearCachedFfprobe(tempPath);
 
             return finalPath;
         } catch (error) {
 
             if (existsSync(tempPath)) {
+                this.clearCachedFfprobe(tempPath);
                 await unlink(tempPath).catch(() => null);
             }
 
@@ -269,10 +300,21 @@ export class MediaProcessor {
     }
 
     private ffprobe(filePath: string): Promise<ffmpeg.FfprobeData> {
+        const cached = this.getCachedFfprobe(filePath);
+        if (cached) {
+            return Promise.resolve(cached);
+        }
+
         return new Promise((resolve, reject) => {
             ffmpeg.ffprobe(filePath, (err, data) => {
-                if (err) reject(err);
-                else resolve(data);
+                if (err) {
+                    this.clearCachedFfprobe(filePath);
+                    reject(err);
+                    return;
+                }
+
+                this.setCachedFfprobe(filePath, data);
+                resolve(data);
             });
         });
     }
