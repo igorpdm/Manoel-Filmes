@@ -258,6 +258,9 @@ function handleMessage(data) {
         case 'subtitle-added':
             fetchAvailableSubtitles().then(() => updateSettingsPanel());
             break;
+        case 'subtitles-ready':
+            fetchAvailableSubtitles().then(() => updateSettingsPanel());
+            break;
     }
 }
 

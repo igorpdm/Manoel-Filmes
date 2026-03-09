@@ -26,14 +26,14 @@ export class MediaProcessor {
     private static FFPROBE_CACHE_TTL_MS = 5 * 60 * 1000;
     private static ffprobeCache = new Map<string, { data: ffmpeg.FfprobeData; expiresAt: number }>();
 
-    constructor(private roomManager: typeof RoomManager.prototype) {}
+    constructor(private roomManager: typeof RoomManager.prototype) { }
 
     async processMedia(roomId: string, filePath: string, options: ProcessMediaOptions = {}): Promise<string> {
-        // 1. Extrair Legendas
-        await this.extractSubtitles(roomId, filePath);
+        const processedPath = await this.convertAudioIfNeeded(roomId, filePath, options.selectedAudioStreamIndex, true);
 
-        // 2. Verificar e Converter Áudio se necessário
-        const processedPath = await this.convertAudioIfNeeded(roomId, filePath, options.selectedAudioStreamIndex);
+        this.extractSubtitlesInBackground(roomId, filePath, processedPath).catch((error) => {
+            logger.error("MediaProcessor", "Erro na extração assíncrona de legendas", error);
+        });
 
         return processedPath;
     }
@@ -94,9 +94,11 @@ export class MediaProcessor {
         MediaProcessor.ffprobeCache.delete(filePath);
     }
 
-    private async extractSubtitles(roomId: string, filePath: string): Promise<void> {
-        this.notifyProgress(roomId, "Analisando legendas...");
-        
+    private async extractSubtitles(roomId: string, filePath: string, reportProgress = true): Promise<number> {
+        if (reportProgress) {
+            this.notifyProgress(roomId, "Analisando legendas...");
+        }
+
         try {
             const metadata = await this.ffprobe(filePath);
             const subtitleStreams = metadata.streams.filter(s => s.codec_type === 'subtitle');
@@ -116,8 +118,8 @@ export class MediaProcessor {
                     ? `Legendas encontradas são bitmap (imagem) e não podem ser extraídas como texto`
                     : `Nenhuma legenda encontrada em ${basename(filePath)}`;
                 logger.info("MediaProcessor", message);
-                if (hadBitmap) this.notifyProgress(roomId, "Legendas bitmap ignoradas (não extraíveis)");
-                return;
+                if (hadBitmap && reportProgress) this.notifyProgress(roomId, "Legendas bitmap ignoradas (não extraíveis)");
+                return 0;
             }
 
             // uploadsDir/roomId_subtitles/
@@ -146,10 +148,12 @@ export class MediaProcessor {
                 });
 
             if (subtitleOutputs.length === 0) {
-                return;
+                return 0;
             }
 
-            this.notifyProgress(roomId, `Extraindo ${subtitleOutputs.length} legenda(s)...`);
+            if (reportProgress) {
+                this.notifyProgress(roomId, `Extraindo ${subtitleOutputs.length} legenda(s)...`);
+            }
 
             const args = [
                 '-nostdin',
@@ -188,6 +192,7 @@ export class MediaProcessor {
                     proc.on('error', (err) => reject(err));
                 });
 
+                let extractedCount = 0;
                 for (const subtitleOutput of subtitleOutputs) {
                     if (!existsSync(subtitleOutput.outputPath)) {
                         logger.warn("MediaProcessor", `Legenda ${subtitleOutput.streamIndex} não foi gerada`);
@@ -196,23 +201,50 @@ export class MediaProcessor {
 
                     const displayName = `${subtitleOutput.lang.toUpperCase()} ${subtitleOutput.title ? `(${subtitleOutput.title})` : ''} ${subtitleOutput.isForced ? '[Forced]' : ''}`.trim();
                     this.roomManager.addSubtitle(roomId, subtitleOutput.outputFilename, displayName);
+                    extractedCount += 1;
                 }
+
+                return extractedCount;
             } catch (error) {
                 for (const subtitleOutput of subtitleOutputs) {
                     if (existsSync(subtitleOutput.outputPath)) {
-                        await unlink(subtitleOutput.outputPath).catch(() => {});
+                        await unlink(subtitleOutput.outputPath).catch(() => { });
                     }
                 }
 
                 logger.error("MediaProcessor", "Erro extraindo legendas", error);
+                return 0;
             }
 
         } catch (error) {
             logger.error("MediaProcessor", "Erro geral na extração de legendas", error);
+            return 0;
         }
     }
 
-    private async convertAudioIfNeeded(roomId: string, filePath: string, selectedAudioStreamIndex?: number): Promise<string> {
+    private async extractSubtitlesInBackground(roomId: string, sourcePath: string, processedPath: string): Promise<void> {
+        const extractedCount = await this.extractSubtitles(roomId, sourcePath, false);
+
+        if (sourcePath !== processedPath && existsSync(sourcePath)) {
+            this.clearCachedFfprobe(sourcePath);
+            await unlink(sourcePath).catch((error) => {
+                logger.error("MediaProcessor", `Falha ao remover mídia original após extrair legendas: ${sourcePath}`, error);
+            });
+        }
+
+        if (extractedCount > 0) {
+            this.roomManager.broadcastAll(roomId, {
+                type: "subtitles-ready",
+            });
+        }
+    }
+
+    private async convertAudioIfNeeded(
+        roomId: string,
+        filePath: string,
+        selectedAudioStreamIndex?: number,
+        keepSourceFile = false,
+    ): Promise<string> {
         this.notifyProgress(roomId, "Verificando codecs de áudio...");
 
         const metadata = await this.ffprobe(filePath);
@@ -287,7 +319,7 @@ export class MediaProcessor {
                 command.run();
             });
 
-            if (existsSync(filePath)) {
+            if (!keepSourceFile && existsSync(filePath)) {
                 this.clearCachedFfprobe(filePath);
                 await unlink(filePath);
             }

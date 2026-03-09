@@ -161,7 +161,8 @@ export type MessageType =
     | "host-changed"
     | "host-inactive"
     | "update-metrics"
-    | "subtitle-added";
+    | "subtitle-added"
+    | "subtitles-ready";
 
 export interface WSMessage {
     type: MessageType;
