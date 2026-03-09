@@ -177,7 +177,7 @@ export const buildEpisodeSelectComponents = (
     .setMinValues(1)
     .setMaxValues(1);
 
-  seasons.forEach((season: any) => {
+  seasons.slice(0, 25).forEach((season: any) => {
     seasonSelect.addOptions({
       label: season.name || `Temporada ${season.seasonNumber}`,
       description: `${season.episodeCount || season.episodes?.length || 0} episódios`,
