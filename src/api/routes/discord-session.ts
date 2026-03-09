@@ -128,6 +128,14 @@ function parseTokenFromQuery(raw: unknown): string {
   return requireNonEmptyString(raw, "token");
 }
 
+function parseRoomIdParam(raw: unknown): string {
+  if (Array.isArray(raw)) {
+    return requireNonEmptyString(raw[0], "roomId");
+  }
+
+  return requireNonEmptyString(raw, "roomId");
+}
+
 function ensureSessionRoom(deps: DiscordSessionDeps, roomId: string) {
   const room = deps.roomManager.getRoom(roomId);
   if (!room || !room.discordSession) {
@@ -191,7 +199,7 @@ export function createDiscordSessionRouter(deps: DiscordSessionDeps): Router {
     try {
       requireTrustedService(req);
 
-      const { roomId } = req.params;
+      const roomId = parseRoomIdParam(req.params.roomId);
       ensureSessionRoom(deps, roomId);
 
       const payload = parseSessionTokenPayload(req.body);
@@ -211,7 +219,7 @@ export function createDiscordSessionRouter(deps: DiscordSessionDeps): Router {
 
   router.get("/validate-token/:roomId", validateTokenRateLimit, (req, res) => {
     try {
-      const { roomId } = req.params;
+      const roomId = parseRoomIdParam(req.params.roomId);
       const token = parseTokenFromQuery(req.query.token);
 
       const user = deps.roomManager.validateToken(roomId, token);
@@ -231,7 +239,7 @@ export function createDiscordSessionRouter(deps: DiscordSessionDeps): Router {
 
   router.get("/session-status/:roomId", (req, res) => {
     try {
-      const { roomId } = req.params;
+      const roomId = parseRoomIdParam(req.params.roomId);
       requireRoomAccess(deps.roomManager, roomId, req);
       const data = deps.getSessionStatusData(roomId);
       if (!data) {
@@ -245,7 +253,7 @@ export function createDiscordSessionRouter(deps: DiscordSessionDeps): Router {
 
   router.post("/session-rating/:roomId", async (req, res) => {
     try {
-      const { roomId } = req.params;
+      const roomId = parseRoomIdParam(req.params.roomId);
       ensureSessionRoom(deps, roomId);
 
       const payload = parseSessionRatingPayload(req.body);
@@ -288,7 +296,7 @@ export function createDiscordSessionRouter(deps: DiscordSessionDeps): Router {
 
   router.post("/discord-end-session/:roomId", async (req, res) => {
     try {
-      const { roomId } = req.params;
+      const roomId = parseRoomIdParam(req.params.roomId);
       ensureSessionRoom(deps, roomId);
 
       const payload = parseHostTokenPayload(req.body);
@@ -311,7 +319,7 @@ export function createDiscordSessionRouter(deps: DiscordSessionDeps): Router {
 
   router.post("/discord-finalize-session/:roomId", async (req, res) => {
     try {
-      const { roomId } = req.params;
+      const roomId = parseRoomIdParam(req.params.roomId);
       const room = ensureSessionRoom(deps, roomId);
 
       const payload = parseHostTokenPayload(req.body);

@@ -159,6 +159,12 @@ export function setupWebSocketServer(wss: WebSocketServer, server: Server): void
         const { roomId, clientId, token } = ws.data;
         logger.info("WS", `Conexão aberta: room=${roomId} client=${clientId} token=${token ? "sim" : "não"}`);
 
+        if (!token) {
+            logger.warn("WS", `Conexão sem token após upgrade: room=${roomId} client=${clientId}`);
+            ws.close(4001, "Missing token");
+            return;
+        }
+
         ws.isAlive = true;
         ws.on("pong", () => { ws.isAlive = true; });
 

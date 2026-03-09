@@ -33,7 +33,7 @@ export function handleWebSocketMessage(ws: ExtendedWebSocket, message: any) {
         logger.info("WS", `Comando: ${data.type} (Client: ${clientId}, Room: ${roomId})`);
     }
 
-    const isHost = roomManager.isHostByToken(roomId, token);
+    const isHost = token ? roomManager.isHostByToken(roomId, token) : false;
 
     switch (data.type) {
         case "session-status":
