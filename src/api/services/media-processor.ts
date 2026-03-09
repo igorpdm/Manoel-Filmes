@@ -1,6 +1,6 @@
 import ffmpeg from "fluent-ffmpeg";
 import { existsSync } from "fs";
-import { mkdir, readdir, rename, unlink, stat, copyFile } from "fs/promises";
+import { mkdir, readdir, rename, unlink, stat } from "fs/promises";
 import { spawn } from "child_process";
 import { join, basename, extname, dirname, relative } from "path";
 import { logger } from "../../shared/logger";
@@ -137,10 +137,6 @@ export class MediaProcessor {
                 // Simplify filename to avoid FS issues: roomId_index_lang.srt
                 const outputFilename = `${roomId}_sub_${stream.index}_${this.sanitizeFilename(lang)}.srt`;
                 const outputPath = join(subtitlesDir, outputFilename);
-                
-                // Strategy: Extract to a simple temp file in CWD, then move.
-                // This avoids FFmpeg struggling with complex/absolute output paths.
-                const tempSrt = `temp_${Date.now()}_${stream.index}.srt`;
 
                 this.notifyProgress(roomId, `Extraindo legenda (${lang})...`);
                 
@@ -154,7 +150,7 @@ export class MediaProcessor {
                             '-y',
                             '-hide_banner',
                             '-loglevel', 'error',
-                            tempSrt
+                            outputPath
                         ];
                         
                         logger.debug("MediaProcessor", `Spawn FFmpeg: ffmpeg ${args.join(' ')}`);
@@ -172,19 +168,14 @@ export class MediaProcessor {
                         proc.on('error', (err) => reject(err));
                     });
 
-                    // Copia em vez de rename para evitar EXDEV em filesystems distintos
-                    if (existsSync(tempSrt)) {
-                        await copyFile(tempSrt, outputPath);
-                        await unlink(tempSrt).catch(() => {});
-                        
+                    if (existsSync(outputPath)) {
                         // Add to room manager
                         const displayName = `${lang.toUpperCase()} ${title ? `(${title})` : ''} ${isForced ? '[Forced]' : ''}`.trim();
                         this.roomManager.addSubtitle(roomId, outputFilename, displayName);
                     }
                 } catch (err) {
                     logger.error("MediaProcessor", `Erro extraindo legenda ${stream.index}`, err);
-                    // Attempt cleanup
-                    if (existsSync(tempSrt)) await unlink(tempSrt).catch(() => {});
+                    if (existsSync(outputPath)) await unlink(outputPath).catch(() => {});
                 }
             }
 
