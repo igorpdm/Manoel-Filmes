@@ -343,32 +343,6 @@ function bindBufferTracking() {
                     const end = dom.video.buffered.end(i);
                     const pct = (end / dom.video.duration) * 100;
                     dom.progressBuffered.style.width = `${pct}%`;
-
-                    const now = Date.now();
-                    const elapsed = (now - state.lastBufferTime) / 1000;
-                    const timeDiff = end - state.lastBufferEnd;
-
-                    if (elapsed >= 2 && timeDiff > 0 && state.estimatedFileSize > 0) {
-                        const bytesDiff = (timeDiff / dom.video.duration) * state.estimatedFileSize;
-                        const bytesPerSecond = bytesDiff / elapsed;
-                        const mbps = bytesPerSecond / (1024 * 1024);
-
-                        if (dom.networkSpeedBadge && dom.networkSpeedEl && mbps > 0.01) {
-                            dom.networkSpeedBadge.style.display = 'flex';
-                            dom.networkSpeedEl.textContent = `${mbps.toFixed(1)} MB/s`;
-
-                            if (mbps < 0.5) {
-                                dom.networkSpeedBadge.style.color = '#ef4444';
-                            } else if (mbps < 2) {
-                                dom.networkSpeedBadge.style.color = '#f59e0b';
-                            } else {
-                                dom.networkSpeedBadge.style.color = '#22c55e';
-                            }
-                        }
-
-                        state.lastBufferEnd = end;
-                        state.lastBufferTime = now;
-                    }
                     break;
                 }
             }

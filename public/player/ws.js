@@ -177,6 +177,13 @@ function handleMessage(data) {
                     (pVal < 150 ? 'ping-good' : pVal < 300 ? 'ping-fair' : 'ping-poor');
             }
 
+            if (dom.networkSpeedBadge && dom.networkSpeedEl) {
+                dom.networkSpeedBadge.style.display = 'flex';
+                dom.networkSpeedEl.textContent = pVal + ' ms';
+                dom.networkSpeedBadge.style.color =
+                    pVal < 150 ? '#22c55e' : pVal < 300 ? '#f59e0b' : '#ef4444';
+            }
+
             if (state.ws?.readyState === WebSocket.OPEN) {
                 state.ws.send(JSON.stringify({
                     type: 'update-metrics',
