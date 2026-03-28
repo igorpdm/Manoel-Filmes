@@ -10,7 +10,8 @@ import type {
     MovieInfo,
     ClientMetrics,
     ExtendedWebSocket,
-    SelectedEpisode
+    SelectedEpisode,
+    EpisodeRating
 } from "../shared/types";
 import { existsSync } from "fs";
 import { rm } from "fs/promises";
@@ -377,6 +378,106 @@ export class RoomManager {
         return this.rooms.get(roomId)?.state.subtitles ?? [];
     }
 
+    // ─── Episode Management ──────────────────────────────────────────────────
+
+    saveCurrentEpisodeToHistory(roomId: string): void {
+        const room = this.rooms.get(roomId);
+        if (!room || !room.selectedEpisode) return;
+
+        const sum = room.ratings.reduce((acc, r) => acc + r.rating, 0);
+        const average = room.ratings.length > 0
+            ? Math.round(sum / room.ratings.length * 10) / 10
+            : 0;
+
+        room.episodeHistory.push({
+            movieName: room.movieName || 'Episódio',
+            selectedEpisode: { ...room.selectedEpisode },
+            ratings: [...room.ratings],
+            average,
+        });
+
+        logger.info("RoomManager", `Episódio salvo no histórico: ${room.movieName} (${room.ratings.length} avaliações, média ${average})`);
+    }
+
+    async resetForNextEpisode(roomId: string): Promise<void> {
+        const room = this.rooms.get(roomId);
+        if (!room) return;
+
+        const resolvedUploadsDir = resolve(UPLOADS_DIR);
+        const mediaPaths = Array.from(new Set(
+            [room.state.videoPath, room.state.pendingVideoPath].filter(Boolean)
+        ));
+
+        for (const mediaPath of mediaPaths) {
+            if (!existsSync(mediaPath)) continue;
+            if (!resolve(mediaPath).startsWith(resolvedUploadsDir)) {
+                logger.warn("RoomManager", `Ignorando deleção de arquivo externo: ${mediaPath}`);
+                continue;
+            }
+            try {
+                await rm(mediaPath, { force: true });
+                logger.info("RoomManager", `Arquivo de mídia removido: ${mediaPath}`);
+            } catch (e) {
+                logger.error("RoomManager", "Erro ao deletar arquivo de mídia na transição de episódio", e);
+            }
+        }
+
+        room.state.videoPath = '';
+        room.state.pendingVideoPath = '';
+        room.state.currentTime = 0;
+        room.state.isPlaying = false;
+        room.state.lastUpdate = Date.now();
+        room.state.isUploading = false;
+        room.state.uploadProgress = 0;
+        room.state.isAwaitingAudioSelection = false;
+        room.state.audioTracks = [];
+        room.state.selectedAudioStreamIndex = null;
+        room.state.audioSelectionErrorMessage = '';
+        room.state.isProcessing = false;
+        room.state.processingMessage = '';
+        room.state.playbackStarted = false;
+        room.state.lastCommandSeq = 0;
+        room.state.subtitles = [];
+        room.ratings = [];
+        room.status = 'waiting';
+
+        logger.info("RoomManager", `Sala ${roomId} resetada para próximo episódio`);
+    }
+
+    updateEpisodeInfo(roomId: string, selectedEpisode: SelectedEpisode, movieName: string): void {
+        const room = this.rooms.get(roomId);
+        if (!room) return;
+        room.selectedEpisode = selectedEpisode;
+        room.movieName = movieName;
+        logger.info("RoomManager", `Episódio atualizado: ${movieName}`);
+    }
+
+    getEpisodeHistory(roomId: string): EpisodeRating[] {
+        return this.rooms.get(roomId)?.episodeHistory ?? [];
+    }
+
+    getNextEpisode(roomId: string): SelectedEpisode | null {
+        const room = this.rooms.get(roomId);
+        if (!room?.selectedEpisode || !room.movieInfo?.seasons) return null;
+
+        const { seasonNumber, episodeNumber } = room.selectedEpisode;
+        const season = room.movieInfo.seasons.find(s => s.seasonNumber === seasonNumber);
+        if (!season) return null;
+
+        const nextEp = season.episodes.find(e => e.episodeNumber === episodeNumber + 1);
+        if (nextEp) {
+            return { ...nextEp, seasonNumber };
+        }
+
+        const nextSeason = room.movieInfo.seasons.find(s => s.seasonNumber === seasonNumber + 1);
+        if (nextSeason?.episodes?.length) {
+            const firstEp = nextSeason.episodes[0];
+            return { ...firstEp, seasonNumber: nextSeason.seasonNumber };
+        }
+
+        return null;
+    }
+
     // ─── Private Helpers ──────────────────────────────────────────────────────
 
     private buildRoom(id: string, videoPath = ''): Room {
@@ -404,6 +505,7 @@ export class RoomManager {
             clients: new Set(),
             tokenMap: new Map(),
             ratings: [],
+            episodeHistory: [],
             status: 'waiting'
         };
     }

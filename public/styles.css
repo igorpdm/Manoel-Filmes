@@ -1290,10 +1290,12 @@ body {
   position: relative;
   margin-bottom: calc(var(--spacing) * 6);
   display: flex;
-  display: inline-block;
+  width: 100%;
+  max-width: 100%;
   cursor: pointer;
   justify-content: center;
-  gap: calc(var(--spacing) * 2);
+  gap: calc(var(--spacing) * 1);
+  padding-inline: calc(var(--spacing) * 2);
   color: 0;
 }
 .star-btn {
@@ -1404,9 +1406,15 @@ body {
 }
 .star-icon {
   display: inline-block;
-  height: 55px;
-  width: 55px;
+  height: 40px;
+  width: 40px;
   fill: currentcolor;
+}
+@media (min-width: 480px) {
+  .star-icon {
+    height: 50px;
+    width: 50px;
+  }
 }
 #rating-value-display {
   display: none !important;
@@ -2398,6 +2406,83 @@ input[type="color"]::-webkit-color-swatch {
 }
 .subtitle-upload-status.error {
   color: var(--color-red-300);
+}
+.btn-next-ep {
+  margin: calc(var(--spacing) * 0);
+  display: flex;
+  height: calc(var(--spacing) * 11);
+  cursor: pointer;
+  align-items: center;
+  gap: calc(var(--spacing) * 2);
+  border-radius: var(--radius-xl);
+  border-style: var(--tw-border-style);
+  border-width: 1px;
+  border-color: color-mix(in srgb, #0047AB 30%, transparent);
+  @supports (color: color-mix(in lab, red, red)) {
+    border-color: color-mix(in oklab, var(--color-primary) 30%, transparent);
+  }
+  padding-inline: calc(var(--spacing) * 4);
+  font-size: 0.9rem;
+  --tw-font-weight: var(--font-weight-semibold);
+  font-weight: var(--font-weight-semibold);
+  white-space: nowrap;
+  color: #93c5fd;
+  transition-property: all;
+  transition-timing-function: var(--tw-ease, var(--default-transition-timing-function));
+  transition-duration: var(--tw-duration, var(--default-transition-duration));
+  --tw-duration: 200ms;
+  transition-duration: 200ms;
+  background: linear-gradient(135deg, rgba(0, 71, 171, 0.2) 0%, rgba(79, 172, 254, 0.1) 100%);
+}
+.btn-next-ep:hover {
+  --tw-translate-y: calc(1px * -1);
+  translate: var(--tw-translate-x) var(--tw-translate-y);
+  border-color: color-mix(in srgb, #0047AB 50%, transparent);
+  @supports (color: color-mix(in lab, red, red)) {
+    border-color: color-mix(in oklab, var(--color-primary) 50%, transparent);
+  }
+  background: linear-gradient(135deg, rgba(0, 71, 171, 0.35) 0%, rgba(79, 172, 254, 0.2) 100%);
+}
+.btn-next-ep svg {
+  height: 18px;
+  width: 18px;
+  flex-shrink: 0;
+  fill: none;
+  stroke: currentcolor;
+}
+.next-episode-modal-content {
+  max-width: 420px;
+  text-align: left;
+}
+.next-episode-modal-content h3 {
+  font-size: 1.2rem;
+}
+.next-ep-description {
+  margin-bottom: calc(var(--spacing) * 4) !important;
+  font-size: 0.9rem;
+  color: var(--color-text-secondary);
+}
+.next-ep-selectors {
+  margin-bottom: calc(var(--spacing) * 4);
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--spacing) * 4);
+}
+.next-ep-info {
+  margin-bottom: calc(var(--spacing) * 6);
+  border-radius: var(--radius-xl);
+  border-style: var(--tw-border-style);
+  border-width: 1px;
+  border-color: var(--color-glass-border);
+  background-color: color-mix(in srgb, #000 30%, transparent);
+  @supports (color: color-mix(in lab, red, red)) {
+    background-color: color-mix(in oklab, var(--color-black) 30%, transparent);
+  }
+  padding: calc(var(--spacing) * 3);
+  font-size: 0.85rem;
+  --tw-leading: var(--leading-normal);
+  line-height: var(--leading-normal);
+  color: #cbd5e1;
 }
 @property --tw-rotate-x {
   syntax: "*";

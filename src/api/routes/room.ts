@@ -22,6 +22,8 @@ export function createRoomRouter(): Router {
                 viewerCount: connectedUsers.length,
                 movieInfo: room.movieInfo || null,
                 selectedEpisode: room.selectedEpisode || null,
+                nextEpisode: roomManager.getNextEpisode(roomId),
+                episodeHistory: roomManager.getEpisodeHistory(roomId),
             });
         } catch (error) {
             sendRouteError(res, error, "APIServer");

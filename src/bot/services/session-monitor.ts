@@ -51,9 +51,11 @@ function resetMonitorState() {
     lastViewerIds = new Set();
     monitorRoomId = null;
     reconnectAttempts = 0;
+    isEpisodeTransition = false;
 }
 
 let finalizing = false;
+let isEpisodeTransition = false;
 
 function closeSocket() {
     if (reconnectTimeout) {
@@ -75,6 +77,7 @@ function connectToSession(client: any, session: ActiveWatchSession) {
     closeSocket();
     monitorRoomId = session.roomId;
     finalizing = false;
+    isEpisodeTransition = false;
 
     const wsUrl = buildWsUrl(session.roomId, session.hostToken);
     monitorSocket = new WebSocket(wsUrl);
@@ -114,7 +117,20 @@ function connectToSession(client: any, session: ActiveWatchSession) {
                 requestSessionStatus();
                 break;
             case "all-ratings-received":
-                await handleAllRatingsReceived(client, currentSession, data);
+                if (isEpisodeTransition) {
+                    logger.info("SessionMonitor", "Avaliações de episódio recebidas (não finalizar sessão)");
+                } else {
+                    await handleAllRatingsReceived(client, currentSession, data);
+                }
+                break;
+            case "episode-ending":
+                isEpisodeTransition = true;
+                break;
+            case "next-episode":
+                isEpisodeTransition = false;
+                await handleNextEpisode(client, currentSession, data);
+                break;
+            case "episode-ratings-received":
                 break;
         }
     };
@@ -211,6 +227,19 @@ async function handleAllRatingsReceived(client: any, session: ActiveWatchSession
 
     await updateSessionEmbed(client, session, "ended", lastViewerIds.size, [], ratings);
     await finalizeSession(session, ratings);
+}
+
+async function handleNextEpisode(client: any, session: ActiveWatchSession, data: any) {
+    const newMovieName = data.movieName || session.movieName;
+    const selectedEpisode = data.selectedEpisode || undefined;
+
+    session.movieName = newMovieName;
+    session.selectedEpisode = selectedEpisode;
+
+    lastStatus = "waiting";
+
+    logger.info("SessionMonitor", `Próximo episódio: ${newMovieName}`);
+    await updateSessionEmbed(client, session, "waiting", lastViewerIds.size, []);
 }
 
 async function finalizeSession(session: ActiveWatchSession, ratings: any[]) {

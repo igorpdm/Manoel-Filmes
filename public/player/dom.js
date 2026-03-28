@@ -102,5 +102,13 @@ export const dom = {
     subtitleUploadZone: document.getElementById('subtitle-upload-zone'),
     subtitleDropzone: document.getElementById('subtitle-dropzone'),
     subtitleSessionInput: document.getElementById('subtitle-session-input'),
-    subtitleUploadStatus: document.getElementById('subtitle-upload-status')
+    subtitleUploadStatus: document.getElementById('subtitle-upload-status'),
+
+    btnNextEpisode: document.getElementById('btn-next-episode'),
+    modalNextEpisode: document.getElementById('modal-next-episode'),
+    nextEpSeasonSelect: document.getElementById('next-ep-season-select'),
+    nextEpEpisodeSelect: document.getElementById('next-ep-episode-select'),
+    nextEpInfo: document.getElementById('next-ep-info'),
+    btnCancelNextEp: document.getElementById('btn-cancel-next-ep'),
+    btnProceedNextEp: document.getElementById('btn-proceed-next-ep'),
 };

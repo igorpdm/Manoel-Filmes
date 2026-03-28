@@ -85,5 +85,9 @@ export const state = {
     lastBufferEnd: 0,
     lastBufferTime: Date.now(),
     availableSubtitles: [],
-    pendingSubtitleFiles: []
+    pendingSubtitleFiles: [],
+    seasons: [],
+    nextEpisode: null,
+    episodeHistory: [],
+    isEpisodeTransition: false,
 };

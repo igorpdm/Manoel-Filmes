@@ -12,7 +12,9 @@ import {
     handleSessionEnded,
     renderUserList,
     updatePlayPauseUI,
-    showHostNotification
+    showHostNotification,
+    resetForNextEpisode,
+    populateMovieModal
 } from './ui.js';
 import { fetchAvailableSubtitles, updateSettingsPanel } from './subtitles.js';
 
@@ -267,6 +269,21 @@ function handleMessage(data) {
             break;
         case 'subtitles-ready':
             fetchAvailableSubtitles().then(() => updateSettingsPanel());
+            break;
+        case 'episode-ending':
+            dom.video.pause();
+            state.isEpisodeTransition = true;
+            showRatingModal();
+            break;
+        case 'next-episode':
+            resetForNextEpisode(data.selectedEpisode, data.movieName);
+            if (data.episodeHistory) state.episodeHistory = data.episodeHistory;
+            if (data.selectedEpisode) {
+                populateMovieModal(state.currentMovieInfo, data.selectedEpisode);
+            }
+            break;
+        case 'episode-ratings-received':
+            showRatingsResults(data.ratings, data.average);
             break;
     }
 }

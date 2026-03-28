@@ -343,5 +343,108 @@ export function createDiscordSessionRouter(deps: DiscordSessionDeps): Router {
     }
   });
 
+  router.post("/next-episode/:roomId", async (req, res) => {
+    try {
+      const roomId = parseRoomIdParam(req.params.roomId);
+      ensureSessionRoom(deps, roomId);
+
+      const payload = parseHostTokenPayload(req.body);
+      ensureHostToken(deps, roomId, payload.token);
+
+      const room = deps.roomManager.getRoom(roomId)!;
+      if (!room.movieInfo || room.movieInfo.mediaType !== "tv") {
+        res.status(400).json({ error: "Recurso disponível apenas para séries" });
+        return;
+      }
+
+      logger.info("DiscordSession", `Dados de episódios solicitados: room=${roomId}`);
+
+      const nextEpisode = deps.roomManager.getNextEpisode(roomId);
+
+      res.json({
+        success: true,
+        currentEpisode: room.selectedEpisode || null,
+        nextEpisode,
+        seasons: room.movieInfo.seasons || [],
+      });
+    } catch (error) {
+      sendRouteError(res, error, "DiscordSession");
+    }
+  });
+
+  router.post("/next-episode-proceed/:roomId", async (req, res) => {
+    try {
+      const roomId = parseRoomIdParam(req.params.roomId);
+      const room = ensureSessionRoom(deps, roomId);
+
+      const payload = requireObject(req.body);
+      const token = requireNonEmptyString(payload.token, "token");
+      ensureHostToken(deps, roomId, token);
+
+      const selectedEpisode = parseSelectedEpisode(payload.selectedEpisode);
+      if (!selectedEpisode) {
+        res.status(400).json({ error: "Episódio inválido" });
+        return;
+      }
+
+      room.pendingNextEpisode = selectedEpisode;
+      logger.info("DiscordSession", `Avaliação de episódio iniciada: room=${roomId}, próximo=T${selectedEpisode.seasonNumber}E${selectedEpisode.episodeNumber}`);
+
+      deps.roomManager.broadcastAll(roomId, { type: "episode-ending" });
+
+      res.json({ success: true });
+    } catch (error) {
+      sendRouteError(res, error, "DiscordSession");
+    }
+  });
+
+  router.post("/next-episode-finalize/:roomId", async (req, res) => {
+    try {
+      const roomId = parseRoomIdParam(req.params.roomId);
+      const room = ensureSessionRoom(deps, roomId);
+
+      const payload = parseHostTokenPayload(req.body);
+      ensureHostToken(deps, roomId, payload.token);
+
+      const selectedEpisode = room.pendingNextEpisode;
+      if (!selectedEpisode) {
+        res.status(400).json({ error: "Nenhum episódio pendente" });
+        return;
+      }
+
+      deps.roomManager.saveCurrentEpisodeToHistory(roomId);
+      await cleanupRoomUploads(deps.uploadsDir, roomId);
+      await deps.roomManager.resetForNextEpisode(roomId);
+
+      const displayTitle = `${room.movieInfo?.title || ""} - T${selectedEpisode.seasonNumber}E${selectedEpisode.episodeNumber}`;
+      deps.roomManager.updateEpisodeInfo(roomId, selectedEpisode, displayTitle);
+      room.pendingNextEpisode = undefined;
+
+      logger.info("DiscordSession", `Próximo episódio: room=${roomId} → ${displayTitle}`);
+
+      deps.roomManager.broadcastAll(roomId, {
+        type: "next-episode",
+        selectedEpisode,
+        movieName: displayTitle,
+        episodeHistory: deps.roomManager.getEpisodeHistory(roomId),
+      });
+
+      const statusData = deps.getSessionStatusData(roomId);
+      if (statusData) {
+        deps.roomManager.broadcastAll(roomId, { type: "session-status", ...statusData });
+      }
+
+      res.json({
+        success: true,
+        movieName: displayTitle,
+        selectedEpisode,
+        episodeHistory: deps.roomManager.getEpisodeHistory(roomId),
+      });
+    } catch (error) {
+      sendRouteError(res, error, "DiscordSession");
+    }
+  });
+
   return router;
 }
+

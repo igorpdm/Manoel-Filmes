@@ -531,7 +531,7 @@ body {
 }
 
 .star-rating {
-  @apply relative inline-block text-[0] cursor-pointer flex justify-center gap-2 mb-6;
+  @apply relative text-[0] cursor-pointer flex justify-center gap-1 mb-6 w-full max-w-full px-2;
 }
 
 .star-btn {
@@ -588,7 +588,13 @@ body {
 }
 
 .star-icon {
-  @apply w-[55px] h-[55px] inline-block fill-current;
+  @apply w-[40px] h-[40px] inline-block fill-current;
+}
+
+@media (min-width: 480px) {
+  .star-icon {
+    @apply w-[50px] h-[50px];
+  }
 }
 
 #rating-value-display {
@@ -1000,3 +1006,40 @@ input[type="color"]::-webkit-color-swatch {
 .subtitle-upload-status.error {
   @apply text-red-300;
 }
+
+/* ========== Next Episode Button ========== */
+.btn-next-ep {
+  @apply flex items-center gap-2 px-4 h-11 rounded-xl text-[0.9rem] font-semibold cursor-pointer transition-all duration-200 whitespace-nowrap m-0 border border-primary/30 text-[#93c5fd];
+  background: linear-gradient(135deg, rgba(0, 71, 171, 0.2) 0%, rgba(79, 172, 254, 0.1) 100%);
+}
+
+.btn-next-ep:hover {
+  @apply -translate-y-[1px] border-primary/50;
+  background: linear-gradient(135deg, rgba(0, 71, 171, 0.35) 0%, rgba(79, 172, 254, 0.2) 100%);
+}
+
+.btn-next-ep svg {
+  @apply w-[18px] h-[18px] stroke-current fill-none flex-shrink-0;
+}
+
+/* ========== Next Episode Modal ========== */
+.next-episode-modal-content {
+  @apply max-w-[420px] text-left;
+}
+
+.next-episode-modal-content h3 {
+  @apply text-[1.2rem];
+}
+
+.next-ep-description {
+  @apply text-text-secondary text-[0.9rem] !mb-4;
+}
+
+.next-ep-selectors {
+  @apply flex flex-col gap-4 mb-4;
+}
+
+.next-ep-info {
+  @apply p-3 rounded-xl border border-glass-border bg-black/30 mb-6 text-[0.85rem] text-[#cbd5e1] leading-normal;
+}
+

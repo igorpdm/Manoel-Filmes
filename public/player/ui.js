@@ -1,6 +1,7 @@
 import { dom } from './dom.js';
 import { buildRoomUrl, state } from './state.js';
 import { formatTime } from './utils.js';
+import { clearSubtitleState } from './subtitles.js';
 
 export function initSidebar() {
     dom.btnToggleUsers?.addEventListener('click', () => dom.usersSidebar?.classList.remove('hidden'));
@@ -108,6 +109,7 @@ export function updateHostUI() {
 
     if (state.isHost) {
         dom.btnEndSession.classList.remove('hidden');
+        updateNextEpisodeButton();
 
         if (state.hasVideo) return;
 
@@ -133,6 +135,7 @@ export function updateHostUI() {
         return;
     } else {
         dom.btnEndSession.classList.add('hidden');
+        dom.btnNextEpisode?.classList.add('hidden');
         if (state.hasVideo) return;
 
         dom.uploadZone.classList.add('hidden');
@@ -169,6 +172,7 @@ export function showPlayer() {
     }
 
     dom.playerOverlay.classList.remove('hidden');
+    updateNextEpisodeButton();
 }
 
 export function showUploadProgress(progress = 0) {
@@ -384,4 +388,55 @@ export function showHostNotification() {
     `;
     document.body.appendChild(notif);
     setTimeout(() => notif.remove(), 4000);
+}
+
+export function updateNextEpisodeButton() {
+    if (!dom.btnNextEpisode) return;
+
+    const isSeries = state.currentMovieInfo?.mediaType === 'tv';
+    const shouldShow = state.isHost && isSeries && state.hasVideo;
+
+    if (shouldShow) {
+        dom.btnNextEpisode.classList.remove('hidden');
+    } else {
+        dom.btnNextEpisode.classList.add('hidden');
+    }
+}
+
+export function resetForNextEpisode(selectedEpisode, movieName) {
+    dom.video.pause();
+    dom.video.removeAttribute('src');
+    dom.video.load();
+    state.hasVideo = false;
+    state.roomStage = 'idle';
+    state.audioTracks = [];
+    state.selectedAudioStreamIndex = null;
+    state.audioSelectionErrorMessage = '';
+    state.selectedRating = 0;
+    state.isEpisodeTransition = false;
+
+    if (selectedEpisode) {
+        state.currentSelectedEpisode = selectedEpisode;
+    }
+
+    if (movieName) {
+        dom.movieNameDisplayEl.textContent = movieName;
+    }
+
+    clearSubtitleState();
+
+    dom.modalRatingEl.classList.add('hidden');
+    dom.modalRatingResults.classList.add('hidden');
+    dom.audioTrackOverlay.classList.add('hidden');
+    dom.playerOverlay.classList.add('hidden');
+
+    if (dom.starsFg) dom.starsFg.style.width = '0%';
+    if (dom.ratingValueDisplay) dom.ratingValueDisplay.textContent = '0';
+    if (dom.btnSubmitRating) dom.btnSubmitRating.disabled = true;
+    if (dom.ratingStatus) {
+        dom.ratingStatus.textContent = '';
+        dom.ratingStatus.classList.add('hidden');
+    }
+
+    updateHostUI();
 }

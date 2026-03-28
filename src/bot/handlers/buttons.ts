@@ -247,6 +247,7 @@ export const handleButton = async (interaction: ButtonInteraction) => {
         voteAverage: pending.tmdbInfo.vote_average,
         genres: pending.tmdbInfo.genres,
         mediaType: pending.tmdbInfo.media_type,
+        seasons: pending.tmdbInfo.seasons,
       },
       discordSession: {
         channelId: pending.channelId,

@@ -1,5 +1,5 @@
 import type { RoomManager } from "../../core/room-manager";
-import type { MovieInfo, SessionRating } from "../../shared/types";
+import type { MovieInfo, SessionRating, SelectedEpisode, EpisodeRating } from "../../shared/types";
 
 interface SessionViewer {
   discordId: string;
@@ -15,6 +15,8 @@ export interface SessionStatusData {
   allRated: boolean;
   movieInfo: MovieInfo | null;
   movieName: string;
+  selectedEpisode: SelectedEpisode | null;
+  episodeHistory: EpisodeRating[];
 }
 
 export function buildSessionStatusData(
@@ -39,5 +41,7 @@ export function buildSessionStatusData(
     allRated: roomManager.allUsersRated(roomId),
     movieInfo: room.movieInfo || null,
     movieName: room.movieName || "Filme",
+    selectedEpisode: room.selectedEpisode || null,
+    episodeHistory: roomManager.getEpisodeHistory(roomId),
   };
 }

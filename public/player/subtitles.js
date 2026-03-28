@@ -326,3 +326,13 @@ export function initSubtitles() {
         new ResizeObserver(() => applySettings()).observe(dom.video);
     }
 }
+
+export function clearSubtitleState() {
+    subtitleState.cues = [];
+    subtitleState.currentCueIndex = -1;
+    subtitleState.settings.enabled = false;
+    subtitleState.settings.selectedFile = null;
+    state.availableSubtitles = [];
+    if (dom.subtitleDisplay) dom.subtitleDisplay.innerHTML = '';
+    updateSettingsPanel();
+}

@@ -83,6 +83,13 @@ export interface SelectedEpisode {
     runtime?: number | null;
 }
 
+export interface EpisodeRating {
+    movieName: string;
+    selectedEpisode: SelectedEpisode;
+    ratings: SessionRating[];
+    average: number;
+}
+
 export interface DiscordUser {
     discordId: string;
     username: string;
@@ -125,6 +132,8 @@ export interface Room {
     discordSession?: DiscordSession;
     tokenMap: Map<string, DiscordUser>;
     ratings: SessionRating[];
+    episodeHistory: EpisodeRating[];
+    pendingNextEpisode?: SelectedEpisode;
     status: SessionStatus;
 }
 
@@ -161,6 +170,9 @@ export type MessageType =
     | "host-changed"
     | "host-inactive"
     | "update-metrics"
+    | "episode-ending"
+    | "next-episode"
+    | "episode-ratings-received"
     | "subtitle-added"
     | "subtitles-ready";
 
@@ -192,4 +204,6 @@ export interface WSMessage {
     newHostId?: string;
     newHostUsername?: string;
     metrics?: ClientMetrics;
+    selectedEpisode?: SelectedEpisode | null;
+    episodeHistory?: EpisodeRating[];
 }

@@ -12,7 +12,8 @@ import {
     updateSyncStatus,
     updateVolumeUI,
     populateMovieModal,
-    showRatingsResults
+    showRatingsResults,
+    updateNextEpisodeButton
 } from './ui.js';
 import { connectWebSocket, startDriftCorrection, sendCommand, requestState, isFromRemote } from './ws.js';
 import { bindUploadEvents } from './upload.js';
@@ -36,6 +37,10 @@ async function fetchRoomInfo() {
             if (data.movieInfo) {
                 state.currentMovieInfo = data.movieInfo;
                 state.currentSelectedEpisode = data.selectedEpisode;
+                state.seasons = data.movieInfo.seasons || [];
+                state.nextEpisode = data.nextEpisode || null;
+                state.episodeHistory = data.episodeHistory || [];
+
                 let displayTitle = data.movieInfo.title;
                 if (data.selectedEpisode) {
                     displayTitle += ` - T${data.selectedEpisode.seasonNumber}E${data.selectedEpisode.episodeNumber}`;
@@ -60,6 +65,8 @@ async function fetchRoomInfo() {
             } else {
                 dom.movieNameDisplayEl.textContent = data.movieName;
             }
+
+            updateNextEpisodeButton();
         }
     } catch (e) {
         log('Erro ao buscar info da sala:', e);
@@ -423,8 +430,26 @@ function bindRatingModal() {
         }
     });
 
-    dom.btnCloseResults?.addEventListener('click', () => {
+    dom.btnCloseResults?.addEventListener('click', async () => {
         dom.modalRatingResults.classList.add('hidden');
+
+        if (state.isEpisodeTransition) {
+            state.isEpisodeTransition = false;
+
+            if (state.isHost) {
+                try {
+                    await fetch(`/api/next-episode-finalize/${state.roomId}`, {
+                        method: 'POST',
+                        headers: buildRoomHeaders({ 'Content-Type': 'application/json' }),
+                        body: JSON.stringify({ token: state.userToken })
+                    });
+                } catch (e) {
+                    log('Erro ao finalizar troca de episódio:', e);
+                }
+            }
+            return;
+        }
+
         document.body.innerHTML = `
             <div style="display:flex;justify-content:center;align-items:center;height:100vh;flex-direction:column;color:white;text-align:center;">
                 <h1>Sessão Concluída</h1>
@@ -433,6 +458,136 @@ function bindRatingModal() {
             </div>
         `;
         window.close();
+    });
+}
+
+function populateNextEpSelectors(seasons, selectedEpisode) {
+    dom.nextEpSeasonSelect.innerHTML = '';
+    for (const season of seasons) {
+        const opt = document.createElement('option');
+        opt.value = season.seasonNumber;
+        opt.textContent = `Temporada ${season.seasonNumber}`;
+        dom.nextEpSeasonSelect.appendChild(opt);
+    }
+
+    if (selectedEpisode) {
+        dom.nextEpSeasonSelect.value = String(selectedEpisode.seasonNumber);
+    }
+
+    updateEpEpisodeSelect(seasons, selectedEpisode);
+}
+
+function updateEpEpisodeSelect(seasons, selectedEpisode) {
+    const seasonNum = Number(dom.nextEpSeasonSelect.value);
+    const season = seasons.find(s => s.seasonNumber === seasonNum);
+    dom.nextEpEpisodeSelect.innerHTML = '';
+
+    if (!season) return;
+
+    for (const ep of season.episodes) {
+        const opt = document.createElement('option');
+        opt.value = ep.episodeNumber;
+        opt.textContent = `E${ep.episodeNumber} - ${ep.name}`;
+        dom.nextEpEpisodeSelect.appendChild(opt);
+    }
+
+    if (selectedEpisode && selectedEpisode.seasonNumber === seasonNum) {
+        dom.nextEpEpisodeSelect.value = String(selectedEpisode.episodeNumber);
+    }
+
+    updateNextEpInfo(seasons);
+}
+
+function updateNextEpInfo(seasons) {
+    const seasonNum = Number(dom.nextEpSeasonSelect.value);
+    const epNum = Number(dom.nextEpEpisodeSelect.value);
+    const season = seasons.find(s => s.seasonNumber === seasonNum);
+    const ep = season?.episodes?.find(e => e.episodeNumber === epNum);
+
+    if (ep?.overview) {
+        dom.nextEpInfo.textContent = ep.overview;
+        dom.nextEpInfo.classList.remove('hidden');
+    } else {
+        dom.nextEpInfo.classList.add('hidden');
+    }
+}
+
+function buildSelectedEpisodeFromSelectors(seasons) {
+    const seasonNum = Number(dom.nextEpSeasonSelect.value);
+    const epNum = Number(dom.nextEpEpisodeSelect.value);
+    const season = seasons.find(s => s.seasonNumber === seasonNum);
+    const ep = season?.episodes?.find(e => e.episodeNumber === epNum);
+    if (!ep) return null;
+    return { ...ep, seasonNumber: seasonNum };
+}
+
+function bindNextEpisodeFlow() {
+    dom.btnNextEpisode?.addEventListener('click', async () => {
+        try {
+            const res = await fetch(`/api/next-episode/${state.roomId}`, {
+                method: 'POST',
+                headers: buildRoomHeaders({ 'Content-Type': 'application/json' }),
+                body: JSON.stringify({ token: state.userToken })
+            });
+
+            if (!res.ok) {
+                log('Erro ao iniciar troca de episódio');
+                return;
+            }
+
+            const data = await res.json();
+            const seasons = data.seasons || state.seasons;
+            const nextEp = data.nextEpisode;
+
+            populateNextEpSelectors(seasons, nextEp);
+
+            dom.nextEpSeasonSelect.onchange = () => {
+                updateEpEpisodeSelect(seasons, null);
+            };
+            dom.nextEpEpisodeSelect.onchange = () => {
+                updateNextEpInfo(seasons);
+            };
+
+            dom.modalNextEpisode.classList.remove('hidden');
+        } catch (e) {
+            log('Erro ao preparar troca de episódio:', e);
+        }
+    });
+
+    dom.btnCancelNextEp?.addEventListener('click', () => {
+        dom.modalNextEpisode.classList.add('hidden');
+    });
+
+    dom.btnProceedNextEp?.addEventListener('click', async () => {
+        const seasons = state.seasons;
+        const selectedEpisode = buildSelectedEpisodeFromSelectors(seasons);
+
+        if (!selectedEpisode) {
+            log('Nenhum episódio selecionado');
+            return;
+        }
+
+        dom.modalNextEpisode.classList.add('hidden');
+        dom.btnProceedNextEp.disabled = true;
+
+        try {
+            const res = await fetch(`/api/next-episode-proceed/${state.roomId}`, {
+                method: 'POST',
+                headers: buildRoomHeaders({ 'Content-Type': 'application/json' }),
+                body: JSON.stringify({
+                    token: state.userToken,
+                    selectedEpisode
+                })
+            });
+
+            if (!res.ok) {
+                log('Erro ao prosseguir para próximo episódio');
+            }
+        } catch (e) {
+            log('Erro na troca de episódio:', e);
+        } finally {
+            dom.btnProceedNextEp.disabled = false;
+        }
     });
 }
 
@@ -455,6 +610,7 @@ function init() {
     requestState();
     updateHostUI();
     fetchAvailableSubtitles();
+    bindNextEpisodeFlow();
 }
 
 init();
