@@ -18,6 +18,7 @@ import {
 import { connectWebSocket, startDriftCorrection, sendCommand, requestState, isFromRemote } from './ws.js';
 import { bindUploadEvents } from './upload.js';
 import { initSubtitles, renderSubtitle, fetchAvailableSubtitles } from './subtitles.js';
+import { initUpscaler } from './upscaler.js';
 
 function log(...args) {
     if (location.hostname === 'localhost') {
@@ -594,6 +595,7 @@ function bindNextEpisodeFlow() {
 function init() {
     initSidebar();
     initSubtitles();
+    initUpscaler();
     bindUploadEvents();
     bindPlayerEvents();
     bindControls();

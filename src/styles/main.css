@@ -166,6 +166,10 @@ body {
   @apply w-full h-full object-contain;
 }
 
+.video-canvas {
+  @apply absolute inset-0 w-full h-full pointer-events-none z-[5];
+}
+
 #upload-zone {
   @apply absolute top-0 left-0 w-full h-full flex flex-col justify-center items-center bg-black/80 z-20 border-2 border-dashed border-white/20 transition-all duration-300;
 }
@@ -867,6 +871,11 @@ input[type="color"]::-webkit-color-swatch {
   @apply w-full h-[6px] rounded-[3px] bg-white/10 appearance-none outline-none cursor-pointer;
 }
 
+.settings-slider:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
 .settings-slider::-webkit-slider-thumb {
   @apply appearance-none w-[18px] h-[18px] rounded-full bg-primary cursor-pointer shadow-[0_2px_8px_rgba(0,71,171,0.4)] transition-transform duration-200;
 }
@@ -899,6 +908,11 @@ input[type="color"]::-webkit-color-swatch {
 /* ========== Toggle Switch ========== */
 .toggle-label {
   @apply flex items-center justify-between cursor-pointer w-full;
+}
+
+.toggle-label[aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .toggle-input {

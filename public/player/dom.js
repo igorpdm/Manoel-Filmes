@@ -1,5 +1,6 @@
 export const dom = {
     video: document.getElementById('video'),
+    videoCanvas: document.getElementById('video-canvas'),
     playerContainer: document.getElementById('player-container'),
     playerOverlay: document.getElementById('player-overlay'),
     playerControls: document.getElementById('player-controls'),
@@ -103,6 +104,11 @@ export const dom = {
     subtitleDropzone: document.getElementById('subtitle-dropzone'),
     subtitleSessionInput: document.getElementById('subtitle-session-input'),
     subtitleUploadStatus: document.getElementById('subtitle-upload-status'),
+    upscalerEnabledToggle: document.getElementById('upscaler-enabled-toggle'),
+    upscalerAlgorithm: document.getElementById('upscaler-algorithm'),
+    upscalerIntensityLabel: document.getElementById('upscaler-intensity-label'),
+    upscalerIntensitySlider: document.getElementById('upscaler-intensity-slider'),
+    upscalerIntensityValue: document.getElementById('upscaler-intensity-value'),
 
     btnNextEpisode: document.getElementById('btn-next-episode'),
     modalNextEpisode: document.getElementById('modal-next-episode'),

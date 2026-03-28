@@ -76,6 +76,7 @@
         <main class="player-wrapper">
             <div id="player-container">
                 <video id="video" playsinline></video>
+                <canvas id="video-canvas" class="video-canvas hidden" aria-hidden="true"></canvas>
                 <div id="subtitle-display" class="subtitle-display"></div>
 
                 <div id="upload-zone" class="hidden">
@@ -255,6 +256,29 @@
                     </div>
 
                     <div class="settings-body">
+                        <div class="setting-group">
+                            <label class="toggle-label">
+                                <span>Upscaler</span>
+                                <input type="checkbox" id="upscaler-enabled-toggle" class="toggle-input">
+                                <span class="toggle-switch"></span>
+                            </label>
+                        </div>
+
+                        <div class="setting-group">
+                            <label for="upscaler-algorithm">Algoritmo</label>
+                            <select id="upscaler-algorithm" class="custom-select">
+                                <option value="fsr1">FSR1</option>
+                                <option value="cas">FidelityFX CAS</option>
+                            </select>
+                        </div>
+
+                        <div class="setting-group">
+                            <label><span id="upscaler-intensity-label">Sharpening</span> <span
+                                    id="upscaler-intensity-value">0.5</span></label>
+                            <input type="range" id="upscaler-intensity-slider" class="settings-slider" min="0"
+                                max="1" step="0.1" value="0.5">
+                        </div>
+
                         <div class="setting-group">
                             <label>Legenda</label>
                             <select id="subtitle-select" class="custom-select">
