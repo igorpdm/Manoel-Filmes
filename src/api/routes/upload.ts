@@ -375,7 +375,25 @@ export function createUploadRouter(deps: UploadDeps): Router {
     }
   };
 
-  const startRoomProcessing = (
+  const getRoomProcessingResponse = (
+    roomId: string,
+    fallbackAudioTracks: AudioTrackInfo[] = []
+  ) => {
+    const room = deps.roomManager.getRoom(roomId);
+    const audioTracks = room?.state.audioTracks.length
+      ? room.state.audioTracks
+      : fallbackAudioTracks;
+
+    return {
+      ready: Boolean(room?.state.videoPath),
+      processing: Boolean(room?.state.isProcessing),
+      requiresAudioSelection: Boolean(room?.state.isAwaitingAudioSelection),
+      audioTracks,
+      errorMessage: room?.state.audioSelectionErrorMessage || '',
+    };
+  };
+
+  const startRoomProcessing = async (
     roomId: string,
     filePath: string,
     selectedAudioStreamIndex?: number,
@@ -401,6 +419,9 @@ export function createUploadRouter(deps: UploadDeps): Router {
     processRoomMedia(roomId, filePath, selectedAudioStreamIndex, availableAudioTracks).catch((error) => {
       logger.error("UploadRoute", `Falha inesperada no fluxo de processamento da sala ${roomId}`, error);
     });
+
+    await Promise.resolve();
+    return getRoomProcessingResponse(roomId, availableAudioTracks);
   };
 
   router.get("/status/:roomId/:uploadId", async (req, res) => {
@@ -711,8 +732,25 @@ export function createUploadRouter(deps: UploadDeps): Router {
     }
 
     const selectedAudioStreamIndex = audioTracks.length === 1 ? audioTracks[0].streamIndex : undefined;
-    startRoomProcessing(roomId, finalPath, selectedAudioStreamIndex, audioTracks);
-    res.json({ success: true, filename: safeFilename, processing: true });
+    const processingState = await startRoomProcessing(roomId, finalPath, selectedAudioStreamIndex, audioTracks);
+
+    if (processingState.requiresAudioSelection) {
+      res.json({
+        success: true,
+        filename: safeFilename,
+        requiresAudioSelection: true,
+        audioTracks: processingState.audioTracks,
+        errorMessage: processingState.errorMessage,
+      });
+      return;
+    }
+
+    res.json({
+      success: true,
+      filename: safeFilename,
+      processing: processingState.processing,
+      ready: processingState.ready,
+    });
   });
 
   router.post("/audio-track/:roomId", async (req, res) => {
@@ -754,8 +792,23 @@ export function createUploadRouter(deps: UploadDeps): Router {
       return;
     }
 
-    startRoomProcessing(roomId, room.state.pendingVideoPath, streamIndex, room.state.audioTracks);
-    res.json({ success: true, processing: true });
+    const processingState = await startRoomProcessing(roomId, room.state.pendingVideoPath, streamIndex, room.state.audioTracks);
+
+    if (processingState.requiresAudioSelection) {
+      res.json({
+        success: true,
+        requiresAudioSelection: true,
+        audioTracks: processingState.audioTracks,
+        errorMessage: processingState.errorMessage,
+      });
+      return;
+    }
+
+    res.json({
+      success: true,
+      processing: processingState.processing,
+      ready: processingState.ready,
+    });
   });
 
   router.post("/cancel-pending/:roomId", async (req, res) => {

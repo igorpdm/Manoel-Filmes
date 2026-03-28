@@ -1,7 +1,7 @@
 import { dom } from './dom.js';
 import { buildRoomHeaders, state, constants } from './state.js';
 import { formatBytes, formatEta } from './utils.js';
-import { showUploadProgress, showAudioTrackSelection, showProcessingProgress, updateUploadProgress, updateHostUI } from './ui.js';
+import { showPlayer, showUploadProgress, showAudioTrackSelection, showProcessingProgress, updateUploadProgress, updateHostUI } from './ui.js';
 
 function log(...args) {
     if (location.hostname === 'localhost') {
@@ -11,6 +11,22 @@ function log(...args) {
 
 function buildAuthHeaders() {
     return buildRoomHeaders();
+}
+
+function applyProcessingState(data, processingMessage) {
+    if (data?.requiresAudioSelection) {
+        showAudioTrackSelection(data.audioTracks || [], data.errorMessage || '');
+        return;
+    }
+
+    if (data?.ready) {
+        showPlayer();
+        return;
+    }
+
+    if (data?.processing && !state.hasVideo && state.roomStage !== 'ready') {
+        showProcessingProgress(processingMessage);
+    }
 }
 
 function sanitizeFilename(name) {
@@ -107,7 +123,7 @@ async function confirmAudioTrackSelection() {
 
         state.selectedAudioStreamIndex = streamIndex;
         state.audioSelectionErrorMessage = '';
-        showProcessingProgress('Processando vídeo... (Isso pode levar alguns minutos)');
+        applyProcessingState(data, 'Processando vídeo... (Isso pode levar alguns minutos)');
     } catch (error) {
         state.audioSelectionErrorMessage = error?.message || 'Erro ao confirmar faixa de áudio';
         if (dom.audioTrackError) {
@@ -367,11 +383,7 @@ export async function uploadFile(file) {
 
         clearStoredUpload();
 
-        if (completeData.requiresAudioSelection) {
-            showAudioTrackSelection(completeData.audioTracks || []);
-        } else if (completeData.processing) {
-            showProcessingProgress('Processando vídeo... (Isso pode levar alguns minutos)');
-        }
+        applyProcessingState(completeData, 'Processando vídeo... (Isso pode levar alguns minutos)');
 
     } catch (err) {
         log('Erro:', err);
