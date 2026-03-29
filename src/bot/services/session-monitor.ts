@@ -52,10 +52,14 @@ function resetMonitorState() {
     monitorRoomId = null;
     reconnectAttempts = 0;
     isEpisodeTransition = false;
+    episodeTransitionMovieName = null;
+    episodeTransitionEpisode = null;
 }
 
 let finalizing = false;
 let isEpisodeTransition = false;
+let episodeTransitionMovieName: string | null = null;
+let episodeTransitionEpisode: any = null;
 
 function closeSocket() {
     if (reconnectTimeout) {
@@ -78,6 +82,8 @@ function connectToSession(client: any, session: ActiveWatchSession) {
     monitorRoomId = session.roomId;
     finalizing = false;
     isEpisodeTransition = false;
+    episodeTransitionMovieName = null;
+    episodeTransitionEpisode = null;
 
     const wsUrl = buildWsUrl(session.roomId, session.hostToken);
     monitorSocket = new WebSocket(wsUrl);
@@ -118,16 +124,20 @@ function connectToSession(client: any, session: ActiveWatchSession) {
                 break;
             case "all-ratings-received":
                 if (isEpisodeTransition) {
-                    logger.info("SessionMonitor", "Avaliações de episódio recebidas (não finalizar sessão)");
+                    await handleEpisodeRatingsReceived(client, currentSession, data);
                 } else {
                     await handleAllRatingsReceived(client, currentSession, data);
                 }
                 break;
             case "episode-ending":
                 isEpisodeTransition = true;
+                episodeTransitionMovieName = currentSession.movieName;
+                episodeTransitionEpisode = currentSession.selectedEpisode;
                 break;
             case "next-episode":
                 isEpisodeTransition = false;
+                episodeTransitionMovieName = null;
+                episodeTransitionEpisode = null;
                 await handleNextEpisode(client, currentSession, data);
                 break;
             case "episode-ratings-received":
@@ -240,6 +250,46 @@ async function handleNextEpisode(client: any, session: ActiveWatchSession, data:
 
     logger.info("SessionMonitor", `Próximo episódio: ${newMovieName}`);
     await updateSessionEmbed(client, session, "waiting", lastViewerIds.size, []);
+}
+
+async function handleEpisodeRatingsReceived(client: any, session: ActiveWatchSession, data: any) {
+    const ratings: { discordId: string; username: string; rating: number }[] = data.ratings || [];
+    const movieName = episodeTransitionMovieName || session.movieName;
+
+    logger.info("SessionMonitor", `Avaliações do episódio recebidas: ${movieName} (${ratings.length} votos)`);
+
+    try {
+        await db.registerMovieStart(movieName, session.tmdbInfo as unknown as Record<string, unknown>);
+
+        for (const r of ratings) {
+            await db.addVote(movieName, r.discordId, r.username, r.rating);
+        }
+
+        logger.info("SessionMonitor", `Votos do episódio persistidos: ${movieName}`);
+    } catch (dbError) {
+        console.error("[SessionMonitor] Falha ao persistir votos do episódio:", dbError);
+    }
+
+    try {
+        const channel = await client.channels.fetch(session.channelId) as TextChannel;
+        if (channel) {
+            const embed = buildSessionEmbed(
+                movieName,
+                session.tmdbInfo,
+                "ended",
+                session.hostUsername,
+                lastViewerIds.size,
+                ratings.map(r => ({ ...r, discordId: r.discordId || '', username: r.username || 'User' })),
+                episodeTransitionEpisode,
+                session.createdAt
+            );
+
+            await channel.send({ embeds: [embed] });
+            logger.info("SessionMonitor", `Embed de avaliação do episódio enviado: ${movieName}`);
+        }
+    } catch (error) {
+        console.error("[SessionMonitor] Falha ao enviar embed de avaliação do episódio:", error);
+    }
 }
 
 async function finalizeSession(session: ActiveWatchSession, ratings: any[]) {
