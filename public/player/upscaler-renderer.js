@@ -63,13 +63,11 @@ export class UpscalerRenderer {
         this.canvas = canvas;
         this.video = video;
         this.gl = canvas.getContext('webgl', {
-            alpha: true,
-            antialias: true,
-            premultipliedAlpha: false,
+            alpha: false,
+            antialias: false,
         }) || canvas.getContext('experimental-webgl', {
-            alpha: true,
-            antialias: true,
-            premultipliedAlpha: false,
+            alpha: false,
+            antialias: false,
         });
 
         if (!this.gl) {
@@ -190,7 +188,7 @@ export class UpscalerRenderer {
 
         gl.useProgram(this.program);
         gl.bindTexture(gl.TEXTURE_2D, this.texture);
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, this.video);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, this.video);
         gl.viewport(viewport.x, viewport.y, viewport.width, viewport.height);
         gl.uniform1i(this.upscaleEnabledLocation, this.settings.isEnabled);
         gl.uniform1i(this.algorithmLocation, this.settings.algorithm === 'cas' ? 1 : 0);
