@@ -64,7 +64,7 @@ const initDb = async () => {
 
     CREATE TABLE IF NOT EXISTS active_votings (
       movie_key TEXT PRIMARY KEY,
-      message_id INTEGER,
+      message_id TEXT,
       channel_id TEXT,
       tmdb_info TEXT,
       allowed_users TEXT
@@ -84,6 +84,25 @@ const initDb = async () => {
   const movieColumnNames = moviesColumns.map((row) => row.name);
   if (!movieColumnNames.includes("genres")) {
     db.prepare("ALTER TABLE movies ADD COLUMN genres TEXT").run();
+  }
+
+  const activeVotingColumns = db.pragma("table_info(active_votings)") as { name: string; type: string }[];
+  const messageIdColumn = activeVotingColumns.find((column) => column.name === "message_id");
+  if (messageIdColumn && messageIdColumn.type.toUpperCase() !== "TEXT") {
+    db.exec(`
+      ALTER TABLE active_votings RENAME TO active_votings_legacy;
+      CREATE TABLE active_votings (
+        movie_key TEXT PRIMARY KEY,
+        message_id TEXT,
+        channel_id TEXT,
+        tmdb_info TEXT,
+        allowed_users TEXT
+      );
+      INSERT INTO active_votings (movie_key, message_id, channel_id, tmdb_info, allowed_users)
+      SELECT movie_key, CAST(message_id AS TEXT), channel_id, tmdb_info, allowed_users
+      FROM active_votings_legacy;
+      DROP TABLE active_votings_legacy;
+    `);
   }
 };
 

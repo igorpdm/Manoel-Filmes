@@ -414,15 +414,25 @@ function renderPendingSubtitles() {
         const file = state.pendingSubtitleFiles[i];
         const item = document.createElement('div');
         item.className = 'subtitle-pending-item';
-        item.innerHTML = `
-            <span class="subtitle-pending-name" title="${file.name}">${file.name}</span>
-            <button type="button" class="subtitle-pending-remove" data-index="${i}">
-                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
-                    <line x1="18" y1="6" x2="6" y2="18"></line>
-                    <line x1="6" y1="6" x2="18" y2="18"></line>
-                </svg>
-            </button>
+
+        const name = document.createElement('span');
+        name.className = 'subtitle-pending-name';
+        name.title = file.name;
+        name.textContent = file.name;
+
+        const removeButton = document.createElement('button');
+        removeButton.type = 'button';
+        removeButton.className = 'subtitle-pending-remove';
+        removeButton.dataset.index = String(i);
+        removeButton.innerHTML = `
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
         `;
+
+        item.appendChild(name);
+        item.appendChild(removeButton);
         dom.subtitlesPendingList.appendChild(item);
     }
 

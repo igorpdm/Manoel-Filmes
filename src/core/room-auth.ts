@@ -10,6 +10,19 @@ export function validateToken(room: Room, token: string): DiscordUser | null {
     return room.tokenMap.get(token) || null;
 }
 
+export function findAuthorizedUserByDiscordId(
+    room: Room,
+    discordId: string
+): { token: string; user: DiscordUser } | null {
+    for (const [token, user] of room.tokenMap) {
+        if (user.discordId === discordId) {
+            return { token, user };
+        }
+    }
+
+    return null;
+}
+
 export function generateUserToken(room: Room, discordId: string, username: string, avatarUrl: string | null = null): string {
     for (const [token, user] of room.tokenMap) {
         if (user.discordId === discordId) return token;

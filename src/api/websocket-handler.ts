@@ -3,6 +3,57 @@ import { roomManager } from "../core/room-manager";
 import { logger } from "../shared/logger";
 import { buildSessionStatusData } from "./services/session-status";
 
+const allowedClientMessageTypes = new Set([
+    "host-heartbeat",
+    "ping",
+    "play",
+    "pause",
+    "seek",
+    "state",
+    "session-status",
+    "update-metrics",
+]);
+
+function isFiniteNonNegativeNumber(value: unknown): value is number {
+    return typeof value === "number" && Number.isFinite(value) && value >= 0;
+}
+
+function parseClientMessage(message: unknown): WSMessage | null {
+    if (!message || typeof message !== "object" || Array.isArray(message)) {
+        return null;
+    }
+
+    const data = message as Record<string, unknown>;
+    if (typeof data.type !== "string" || !allowedClientMessageTypes.has(data.type)) {
+        return null;
+    }
+
+    if (data.currentTime !== undefined && !isFiniteNonNegativeNumber(data.currentTime)) {
+        return null;
+    }
+
+    if (data.timestamp !== undefined && !isFiniteNonNegativeNumber(data.timestamp)) {
+        return null;
+    }
+
+    if (data.seq !== undefined && (!Number.isInteger(data.seq) || (data.seq as number) < 0)) {
+        return null;
+    }
+
+    if (data.metrics !== undefined) {
+        if (!data.metrics || typeof data.metrics !== "object" || Array.isArray(data.metrics)) {
+            return null;
+        }
+
+        const metrics = data.metrics as Record<string, unknown>;
+        if (metrics.lastPing !== undefined && !isFiniteNonNegativeNumber(metrics.lastPing)) {
+            return null;
+        }
+    }
+
+    return data as unknown as WSMessage;
+}
+
 function isCommandSeqValid(roomId: string, seq?: number): boolean {
     if (typeof seq !== "number") return true;
     const lastSeq = roomManager.getLastCommandSeq(roomId);
@@ -13,7 +64,13 @@ export function handleWebSocketMessage(ws: ExtendedWebSocket, message: any) {
     const { roomId, clientId, token } = ws.data;
     let data: WSMessage;
     try {
-        data = JSON.parse(message.toString()) as WSMessage;
+        const parsed = parseClientMessage(JSON.parse(message.toString()));
+        if (!parsed) {
+            logger.warn("WS", `Payload inválido descartado: room=${roomId} client=${clientId}`);
+            return;
+        }
+
+        data = parsed;
     } catch {
         return;
     }
@@ -58,6 +115,7 @@ export function handleWebSocketMessage(ws: ExtendedWebSocket, message: any) {
         case "play": {
             if (!isHost) break;
             if (!isCommandSeqValid(roomId, data.seq)) break;
+            if (!isFiniteNonNegativeNumber(data.currentTime)) break;
 
             roomManager.updateHostHeartbeat(roomId);
             logger.info("WS", `▶️ Play: Room ${roomId} at ${data.currentTime}s`);
@@ -107,6 +165,7 @@ export function handleWebSocketMessage(ws: ExtendedWebSocket, message: any) {
         case "pause":
             if (!isHost) break;
             if (!isCommandSeqValid(roomId, data.seq)) break;
+            if (!isFiniteNonNegativeNumber(data.currentTime)) break;
 
             roomManager.updateHostHeartbeat(roomId);
             logger.info("WS", `⏸️ Pause: Room ${roomId} at ${data.currentTime}s`);
@@ -131,6 +190,7 @@ export function handleWebSocketMessage(ws: ExtendedWebSocket, message: any) {
         case "seek":
             if (!isHost) break;
             if (!isCommandSeqValid(roomId, data.seq)) break;
+            if (!isFiniteNonNegativeNumber(data.currentTime)) break;
 
             roomManager.updateHostHeartbeat(roomId);
             logger.info("WS", `⏩ Seek: Room ${roomId} to ${data.currentTime}s`);

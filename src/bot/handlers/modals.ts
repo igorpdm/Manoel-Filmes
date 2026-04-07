@@ -1,16 +1,74 @@
 import { GuildMember, ModalSubmitInteraction, MessageFlags } from "discord.js";
 import db from "../../database";
 import { searchMovieTmdb } from "../services/tmdb";
+import { buildRecommendations } from "../services/recommendations";
 import {
   pendingWatchlistCache,
   pendingRemovalCache,
   pendingSessionCache,
   activeWatchSession,
+  recCache,
 } from "../state";
-import { buildSessionEmbed } from "../ui/embeds";
-import { buildEpisodeSelectComponents, buildSessionConfirmComponents } from "../ui/components";
+import { buildRecommendationLoadingEmbed, buildRecommendationsListEmbed, buildSessionEmbed } from "../ui/embeds";
+import { buildEpisodeSelectComponents, buildRecommendationSelectComponents, buildSessionConfirmComponents } from "../ui/components";
 
 export const handleModalSubmit = async (interaction: ModalSubmitInteraction) => {
+  if (interaction.customId === "recommend_modal") {
+    const quantidade = Number(interaction.fields.getStringSelectValues("recommend_quantity")[0] || "5");
+    const generoValue = interaction.fields.getStringSelectValues("recommend_genre")[0] || "all";
+    const includeSeriesValue = interaction.fields.getStringSelectValues("recommend_include_series")[0] || "no";
+    const genero = generoValue === "all" ? null : generoValue;
+    const includeSeries = includeSeriesValue === "yes";
+
+    await interaction.reply({
+      embeds: [
+        buildRecommendationLoadingEmbed(
+          quantidade,
+          genero,
+          includeSeries,
+          "Analisando historico",
+          "Estou montando o perfil do grupo antes de buscar novas recomendacoes."
+        ),
+      ],
+    });
+
+    const progressMessage = await interaction.fetchReply();
+
+    try {
+      const movies = await db.getAllMoviesWithRatings();
+      const recomendacoes = await buildRecommendations(movies, quantidade, genero, includeSeries, {
+        onProgress: async ({ step, detail }) => {
+          await interaction.editReply({
+            embeds: [buildRecommendationLoadingEmbed(quantidade, genero, includeSeries, step, detail)],
+            components: [],
+          });
+        },
+      });
+
+      if (!recomendacoes.length) {
+        await interaction.editReply({
+          content: "❌ Não foi possível gerar recomendações com esses filtros.",
+          embeds: [],
+          components: [],
+        });
+        return;
+      }
+
+      const embed = await buildRecommendationsListEmbed(recomendacoes);
+      const components = buildRecommendationSelectComponents(recomendacoes);
+      await interaction.editReply({ content: undefined, embeds: [embed], components });
+      recCache.set(progressMessage.id, { recommendations: recomendacoes });
+    } catch (error: any) {
+      await interaction.editReply({
+        content: `❌ Erro ao gerar recomendações: ${error.message}`,
+        embeds: [],
+        components: [],
+      });
+    }
+
+    return;
+  }
+
   if (interaction.customId === "session_create") {
     if (activeWatchSession) {
       await interaction.reply({
@@ -22,12 +80,12 @@ export const handleModalSubmit = async (interaction: ModalSubmitInteraction) => 
 
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
-    const sala = interaction.fields.getTextInputValue("session_title").trim() || "Sessão de Cinema";
-    const filme = interaction.fields.getTextInputValue("session_movie").trim();
+    const sessionTitle = interaction.fields.getTextInputValue("session_title").trim() || "Sessão de Cinema";
+    const movieQuery = interaction.fields.getTextInputValue("session_movie").trim();
 
-    const tmdbInfo = await searchMovieTmdb(filme);
+    const tmdbInfo = await searchMovieTmdb(movieQuery);
     if (!tmdbInfo) {
-      await interaction.followUp({ content: `❌ Filme **${filme}** não encontrado no TMDB.`, flags: MessageFlags.Ephemeral });
+      await interaction.followUp({ content: `❌ Filme **${movieQuery}** não encontrado no TMDB.`, flags: MessageFlags.Ephemeral });
       return;
     }
 
@@ -45,7 +103,7 @@ export const handleModalSubmit = async (interaction: ModalSubmitInteraction) => 
 
       pendingSessionCache.set(message.id, {
         tmdbInfo,
-        sala,
+        sessionTitle,
         hostId: interaction.user.id,
         hostUsername: interaction.member instanceof GuildMember
           ? interaction.member.displayName
@@ -65,7 +123,7 @@ export const handleModalSubmit = async (interaction: ModalSubmitInteraction) => 
 
     pendingSessionCache.set(message.id, {
       tmdbInfo,
-      sala,
+      sessionTitle,
       hostId: interaction.user.id,
       hostUsername: interaction.member instanceof GuildMember
         ? interaction.member.displayName

@@ -231,7 +231,7 @@ export const handleButton = async (interaction: ButtonInteraction) => {
     }
 
     const result = await playerApi.createDiscordSession({
-      title: pending.sala,
+      title: pending.sessionTitle,
       movieName: displayTitle,
       movieInfo: {
         id: pending.tmdbInfo.id,
@@ -309,15 +309,15 @@ export const handleButton = async (interaction: ButtonInteraction) => {
     }
 
     const perPage = 5;
-    const maxPages = cached.filmes.length ? Math.floor((cached.filmes.length - 1) / perPage) + 1 : 1;
+    const maxPages = cached.movies.length ? Math.floor((cached.movies.length - 1) / perPage) + 1 : 1;
     const nextPage = customId === "list_next" ? cached.page + 1 : cached.page - 1;
     if (nextPage < 0 || nextPage >= maxPages) {
       await interaction.deferUpdate();
       return;
     }
 
-    const embed = buildListEmbed(cached.filmes, nextPage, cached.botAvatarUrl);
-    const components = buildListComponents(cached.filmes, nextPage);
+    const embed = buildListEmbed(cached.movies, nextPage, cached.botAvatarUrl);
+    const components = buildListComponents(cached.movies, nextPage);
     cached.page = nextPage;
 
     await interaction.update({ embeds: [embed], components });

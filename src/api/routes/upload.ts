@@ -20,6 +20,11 @@ import {
 const activeUploadsByRoom = new Map<string, string>();
 const UPLOAD_TTL_MS = 30 * 60 * 1000;
 const CLEANUP_INTERVAL = 5 * 60 * 1000;
+const MAX_UPLOAD_SIZE_BYTES = 50 * 1024 * 1024 * 1024;
+const MAX_UPLOAD_CHUNK_SIZE_BYTES = 16 * 1024 * 1024;
+const MAX_UPLOAD_CHUNKS = 100000;
+const MAX_SUBTITLE_SIZE_BYTES = 2 * 1024 * 1024;
+const UPLOAD_ID_PATTERN = /^[a-zA-Z0-9_-]+$/;
 
 // Cache de handles de arquivo abertos: uploadId -> { handle, lastUsed }
 const fileHandleCache = new Map<string, { handle: fs.FileHandle, lastUsed: number }>();
@@ -185,7 +190,32 @@ async function markActivity(chunksDir: string, uploadId: string) {
   meta.lastActivity = Date.now();
 }
 
-async function removeUpload(chunksDir: string) {
+function isPathInsideUploadsDir(uploadsDir: string, targetPath: string): boolean {
+  const uploadsRoot = resolve(uploadsDir);
+  const resolvedTargetPath = resolve(targetPath);
+  return resolvedTargetPath === uploadsRoot || resolvedTargetPath.startsWith(`${uploadsRoot}/`);
+}
+
+function resolveUploadDir(uploadsDir: string, uploadId: string): string | null {
+  if (!UPLOAD_ID_PATTERN.test(uploadId)) {
+    return null;
+  }
+
+  const chunksDir = resolve(uploadsDir, uploadId);
+  return isPathInsideUploadsDir(uploadsDir, chunksDir) ? chunksDir : null;
+}
+
+function parseUploadInteger(value: unknown): number | null {
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) ? parsed : null;
+}
+
+async function removeUpload(uploadsDir: string, chunksDir: string) {
+  if (!isPathInsideUploadsDir(uploadsDir, chunksDir)) {
+    logger.warn("UploadRoute", `Ignorando remoção fora da pasta de uploads: ${chunksDir}`);
+    return;
+  }
+
   if (existsSync(chunksDir)) {
     try {
       await rm(chunksDir, { recursive: true, force: true });
@@ -225,7 +255,7 @@ async function cleanupUploads(uploadsDir: string) {
     if (age > UPLOAD_TTL_MS) {
       await closeUploadHandle(uploadId);
       clearMetaCache(uploadId);
-      await removeUpload(dirPath);
+      await removeUpload(uploadsDir, dirPath);
     }
   }
 }
@@ -252,7 +282,7 @@ export async function cleanupRoomUploads(uploadsDir: string, roomId: string) {
     const activeDir = join(uploadsDir, activeUploadId);
     await closeUploadHandle(activeUploadId);
     clearMetaCache(activeUploadId);
-    await removeUpload(activeDir);
+    await removeUpload(uploadsDir, activeDir);
     activeUploadsByRoom.delete(roomId);
   }
 
@@ -263,7 +293,7 @@ export async function cleanupRoomUploads(uploadsDir: string, roomId: string) {
       await closeUploadHandle(dirName);
       clearMetaCache(dirName);
     }
-    await removeUpload(dir);
+    await removeUpload(uploadsDir, dir);
   }
 
   const subtitlesDir = getSubtitlesDir(uploadsDir, roomId);
@@ -437,7 +467,12 @@ export function createUploadRouter(deps: UploadDeps): Router {
     const authError = ensureUploadAuthorized(roomId, auth.token, deps);
     if (authError) { res.status(authError.status).json({ error: authError.error }); return; }
 
-    const chunksDir = join(deps.uploadsDir, uploadId);
+    const chunksDir = resolveUploadDir(deps.uploadsDir, uploadId);
+    if (!chunksDir) {
+      res.status(400).json({ error: "Upload inválido" });
+      return;
+    }
+
     if (!existsSync(chunksDir)) {
       res.status(404).json({ error: "Upload não encontrado" });
       return;
@@ -481,11 +516,15 @@ export function createUploadRouter(deps: UploadDeps): Router {
     const authError = ensureUploadAuthorized(roomId, auth.token, deps);
     if (authError) { res.status(authError.status).json({ error: authError.error }); return; }
 
-    const chunksDir = join(deps.uploadsDir, uploadId);
+    const chunksDir = resolveUploadDir(deps.uploadsDir, uploadId);
+    if (!chunksDir) {
+      res.status(400).json({ error: "Upload inválido" });
+      return;
+    }
 
     await closeUploadHandle(uploadId);
     clearMetaCache(uploadId);
-    await removeUpload(chunksDir);
+    await removeUpload(deps.uploadsDir, chunksDir);
 
     if (activeUploadsByRoom.get(roomId) === uploadId) {
       activeUploadsByRoom.delete(roomId);
@@ -515,27 +554,50 @@ export function createUploadRouter(deps: UploadDeps): Router {
       return;
     }
 
-    const { filename } = body;
-    const totalChunks = Number(body.totalChunks) || 0;
-    const chunkSize = Number(body.chunkSize) || 0;
-    const totalSize = Number(body.totalSize) || 0;
+    const filename = typeof body.filename === "string" ? body.filename : "";
+    const totalChunks = parseUploadInteger(body.totalChunks) ?? 0;
+    const chunkSize = parseUploadInteger(body.chunkSize) ?? 0;
+    const totalSize = parseUploadInteger(body.totalSize) ?? 0;
 
-    if (!totalChunks || !chunkSize) {
+    if (!filename.trim()) {
+      res.status(400).json({ error: "Nome do arquivo inválido" });
+      return;
+    }
+
+    if (
+      totalChunks <= 0 ||
+      totalChunks > MAX_UPLOAD_CHUNKS ||
+      chunkSize <= 0 ||
+      chunkSize > MAX_UPLOAD_CHUNK_SIZE_BYTES ||
+      totalSize <= 0 ||
+      totalSize > MAX_UPLOAD_SIZE_BYTES
+    ) {
       res.status(400).json({ error: "Dados de upload inválidos" });
+      return;
+    }
+
+    const minimumExpectedSize = (totalChunks - 1) * chunkSize;
+    const maximumExpectedSize = totalChunks * chunkSize;
+    if (totalSize <= minimumExpectedSize || totalSize > maximumExpectedSize) {
+      res.status(400).json({ error: "Tamanho total do upload inválido" });
       return;
     }
 
     const currentUpload = activeUploadsByRoom.get(roomId);
     if (currentUpload) {
       const currentDir = join(deps.uploadsDir, currentUpload);
-      await removeUpload(currentDir);
+      await removeUpload(deps.uploadsDir, currentDir);
       clearMetaCache(currentUpload);
       activeUploadsByRoom.delete(roomId);
     }
 
     const uploadId = `${roomId}_${Date.now()}`;
     const safeFilename = sanitizeUploadFilename(filename);
-    const chunksDir = join(deps.uploadsDir, uploadId);
+    const chunksDir = resolveUploadDir(deps.uploadsDir, uploadId);
+    if (!chunksDir) {
+      res.status(500).json({ error: "Falha ao preparar upload" });
+      return;
+    }
 
     mkdirSync(chunksDir, { recursive: true });
 
@@ -576,7 +638,7 @@ export function createUploadRouter(deps: UploadDeps): Router {
     });
     deps.roomManager.broadcastAll(roomId, { type: "upload-start", filename });
 
-    res.json({ uploadId, safeFilename, chunksDir });
+    res.json({ uploadId, safeFilename });
   });
 
   router.post("/chunk/:roomId/:uploadId/:chunkIndex", async (req, res) => {
@@ -593,7 +655,12 @@ export function createUploadRouter(deps: UploadDeps): Router {
     const authError = ensureUploadAuthorized(roomId, auth.token, deps);
     if (authError) { res.status(authError.status).json({ error: authError.error }); return; }
 
-    const chunksDir = join(deps.uploadsDir, uploadId);
+    const chunksDir = resolveUploadDir(deps.uploadsDir, uploadId);
+    if (!chunksDir) {
+      res.status(400).json({ error: "Upload inválido" });
+      return;
+    }
+
     if (!existsSync(chunksDir)) {
       res.status(404).json({ error: "Upload não encontrado" });
       return;
@@ -613,14 +680,27 @@ export function createUploadRouter(deps: UploadDeps): Router {
     const partPath = getPartPath(chunksDir);
     const chunkSize = meta.chunkSize;
     const position = chunkIndex * chunkSize;
+    const expectedChunkSize = Math.min(chunkSize, meta.totalSize - position);
+
+    if (expectedChunkSize <= 0) {
+      res.status(400).json({ error: "Chunk inválido" });
+      return;
+    }
+
     const fileHandle = await getUploadHandle(uploadId, partPath);
     activeWriteCounts.set(uploadId, (activeWriteCounts.get(uploadId) || 0) + 1);
+    let bytesWritten = 0;
+    let isChunkTooLarge = false;
 
     try {
-      let offset = position;
       for await (const chunk of req) {
-        await fileHandle.write(chunk, 0, chunk.length, offset);
-        offset += chunk.length;
+        if (bytesWritten + chunk.length > expectedChunkSize) {
+          isChunkTooLarge = true;
+          break;
+        }
+
+        await fileHandle.write(chunk, 0, chunk.length, position + bytesWritten);
+        bytesWritten += chunk.length;
       }
     } catch (e) {
       logger.error("UploadRoute", `Falha ao escrever chunk ${chunkIndex} do upload ${uploadId}`, e);
@@ -641,11 +721,23 @@ export function createUploadRouter(deps: UploadDeps): Router {
       activeWriteCounts.set(uploadId, remaining);
     }
 
+    if (isChunkTooLarge) {
+      res.status(413).json({ error: "Chunk excede o tamanho permitido" });
+      return;
+    }
+
+    if (bytesWritten !== expectedChunkSize) {
+      res.status(400).json({ error: "Chunk incompleto" });
+      return;
+    }
+
     meta.lastActivity = Date.now();
     const receivedSet = receivedChunkSets.get(uploadId) || new Set<number>();
     receivedSet.add(chunkIndex);
     receivedChunkSets.set(uploadId, receivedSet);
+    meta.receivedChunks = Array.from(receivedSet);
     activeUploadsByRoom.set(roomId, uploadId);
+    await writeMetaAsync(chunksDir, meta);
 
     const progress = computeUploadProgress(meta, receivedSet);
     deps.roomManager.updateState(roomId, { isUploading: true, uploadProgress: progress });
@@ -668,23 +760,25 @@ export function createUploadRouter(deps: UploadDeps): Router {
     const authError = ensureUploadAuthorized(roomId, auth.token, deps);
     if (authError) { res.status(authError.status).json({ error: authError.error }); return; }
 
-    const { filename, totalChunks } = body;
+    const chunksDir = resolveUploadDir(deps.uploadsDir, uploadId);
+    if (!chunksDir) {
+      res.status(400).json({ error: "Upload inválido" });
+      return;
+    }
 
-    const chunksDir = join(deps.uploadsDir, uploadId);
-    const safeFilename = sanitizeUploadFilename(filename);
-
-    const meta = metaCache.get(uploadId);
+    const meta = metaCache.get(uploadId) || await getOrLoadMeta(chunksDir, uploadId);
     if (!meta || meta.roomId !== roomId) {
       res.status(400).json({ error: "Upload inválido" });
       return;
     }
 
     const receivedSet = receivedChunkSets.get(uploadId);
-    if (!receivedSet || receivedSet.size !== totalChunks) {
-      res.status(400).json({ error: "Upload incompleto", received: receivedSet?.size || 0, expected: totalChunks });
+    if (!receivedSet || receivedSet.size !== meta.totalChunks) {
+      res.status(400).json({ error: "Upload incompleto", received: receivedSet?.size || 0, expected: meta.totalChunks });
       return;
     }
 
+    const safeFilename = meta.filename;
     const finalPath = join(deps.uploadsDir, `${uploadId}_${safeFilename}`);
     const partPath = getPartPath(chunksDir);
 
@@ -694,7 +788,7 @@ export function createUploadRouter(deps: UploadDeps): Router {
     clearMetaCache(uploadId);
 
     await fs.rename(partPath, finalPath);
-    await removeUpload(chunksDir);
+    await removeUpload(deps.uploadsDir, chunksDir);
 
     if (activeUploadsByRoom.get(roomId) === uploadId) {
       activeUploadsByRoom.delete(roomId);
@@ -888,14 +982,19 @@ export function createUploadRouter(deps: UploadDeps): Router {
     const authError = ensureUploadAuthorized(roomId, auth.token, deps);
     if (authError) { res.status(authError.status).json({ error: authError.error }); return; }
 
-    const { uploadId } = body;
+    const bodyUploadId = typeof body.uploadId === "string" ? body.uploadId : "";
 
     // Mantém compatibilidade: este endpoint serve para atualizar lastActivity/sinal de atividade,
     // mas o progresso deve ser derivado dos chunks recebidos no servidor.
-    const effectiveUploadId = uploadId || activeUploadsByRoom.get(roomId);
+    const effectiveUploadId = bodyUploadId || activeUploadsByRoom.get(roomId);
 
     if (effectiveUploadId) {
-      const chunksDir = join(deps.uploadsDir, effectiveUploadId);
+      const chunksDir = resolveUploadDir(deps.uploadsDir, effectiveUploadId);
+      if (!chunksDir) {
+        res.status(400).json({ error: "Upload inválido" });
+        return;
+      }
+
       if (existsSync(chunksDir)) {
         activeUploadsByRoom.set(roomId, effectiveUploadId);
         markActivity(chunksDir, effectiveUploadId).catch((error) => {
@@ -937,7 +1036,14 @@ export function createUploadRouter(deps: UploadDeps): Router {
     }
 
     const chunks: Buffer[] = [];
+    let totalSubtitleBytes = 0;
     for await (const chunk of req) {
+      totalSubtitleBytes += chunk.length;
+      if (totalSubtitleBytes > MAX_SUBTITLE_SIZE_BYTES) {
+        res.status(413).json({ error: "Legenda excede o tamanho máximo permitido" });
+        return;
+      }
+
       chunks.push(chunk);
     }
     const buffer = Buffer.concat(chunks);

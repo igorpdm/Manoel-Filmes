@@ -35,7 +35,7 @@ export interface VotingEntry {
 }
 
 export interface ListEntry {
-    filmes: unknown[];
+    movies: unknown[];
     page: number;
     botAvatarUrl: string | undefined;
 }
@@ -46,7 +46,7 @@ export interface WatchlistEntry {
 }
 
 export interface RecEntry {
-    recomendacoes: { titulo: string; motivo: string }[];
+  recommendations: { titulo: string; motivo: string }[];
 }
 
 export interface PendingRegisterEntry {
@@ -74,7 +74,7 @@ export const pendingSessionCache = new TTLCache<string, PendingSession>();
 
 export interface PendingSession {
     tmdbInfo: TmdbSearchResult;
-    sala: string;
+    sessionTitle: string;
     hostId: string;
     hostUsername: string;
     channelId: string;

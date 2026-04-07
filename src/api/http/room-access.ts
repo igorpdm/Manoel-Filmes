@@ -27,11 +27,6 @@ export function getRoomTokenFromRequest(request: Request, body?: unknown): strin
   const headerToken = getTokenFromHeader(request);
   if (headerToken) return headerToken;
 
-  const queryToken = request.query.token;
-  if (typeof queryToken === "string" && queryToken.trim()) {
-    return queryToken.trim();
-  }
-
   if (body && typeof body === "object" && !Array.isArray(body)) {
     const bodyToken = (body as Record<string, unknown>).token;
     if (typeof bodyToken === "string" && bodyToken.trim()) {
@@ -50,6 +45,29 @@ function requireDiscordRoom(roomManager: typeof RoomManager.prototype, roomId: s
   return room;
 }
 
+function getRoomAccessFromOAuthSession(
+  roomManager: typeof RoomManager.prototype,
+  roomId: string,
+  room: Room,
+  request: Request
+): RoomAccessContext | null {
+  const discordId = request.oauthSession?.discordId;
+  if (!discordId) {
+    return null;
+  }
+
+  const authorized = roomManager.findAuthorizedUserByDiscordId(roomId, discordId);
+  if (!authorized) {
+    return null;
+  }
+
+  return {
+    room,
+    token: authorized.token,
+    user: authorized.user,
+  };
+}
+
 export function requireRoomAccess(
   roomManager: typeof RoomManager.prototype,
   roomId: string,
@@ -60,6 +78,11 @@ export function requireRoomAccess(
   const token = getRoomTokenFromRequest(request, body);
 
   if (!token) {
+    const oauthContext = getRoomAccessFromOAuthSession(roomManager, roomId, room, request);
+    if (oauthContext) {
+      return oauthContext;
+    }
+
     throw new UnauthorizedHttpError("Token de acesso obrigatório");
   }
 

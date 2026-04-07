@@ -1,8 +1,8 @@
-import { Router } from "express";
+import { Router, type Response } from "express";
 import { logger } from "../../shared/logger";
 import { sendRouteError } from "../http/route-error";
 import { createRateLimit } from "../http/rate-limit";
-import { ForbiddenHttpError, ValidationHttpError, InfraHttpError } from "../http/http-error";
+import { ForbiddenHttpError, InfraHttpError } from "../http/http-error";
 import {
     createOAuthSession,
     setSessionCookie,
@@ -14,6 +14,7 @@ import {
 import {
     DISCORD_CLIENT_ID,
     DISCORD_CLIENT_SECRET,
+    DISCORD_TOKEN,
     DISCORD_OAUTH_REDIRECT_URI,
 } from "../../config";
 import type { RoomManager } from "../../core/room-manager";
@@ -21,6 +22,8 @@ import type { RoomManager } from "../../core/room-manager";
 const DISCORD_API_BASE = "https://discord.com/api/v10";
 const DISCORD_OAUTH_AUTHORIZE = "https://discord.com/oauth2/authorize";
 const OAUTH_SCOPES = "identify";
+const OAUTH_REDIRECT_COOKIE_NAME = "oauth_redirect";
+const OAUTH_STATE_COOKIE_NAME = "oauth_state";
 
 const oauthLoginRateLimit = createRateLimit({ key: "oauth-login", limit: 30, windowMs: 60000 });
 const oauthCallbackRateLimit = createRateLimit({ key: "oauth-callback", limit: 20, windowMs: 60000 });
@@ -43,6 +46,74 @@ interface DiscordUserResponse {
     discriminator: string;
     avatar: string | null;
     global_name: string | null;
+}
+
+function getOAuthCookieOptions() {
+    return {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax" as const,
+        maxAge: 10 * 60 * 1000,
+        path: "/api/oauth",
+    };
+}
+
+function clearOAuthFlowCookies(res: Response): void {
+    const cookieOptions = {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax" as const,
+        path: "/api/oauth",
+    };
+
+    res.clearCookie(OAUTH_REDIRECT_COOKIE_NAME, cookieOptions);
+    res.clearCookie(OAUTH_STATE_COOKIE_NAME, cookieOptions);
+}
+
+function normalizeOAuthRedirect(value: unknown): string {
+    if (typeof value !== "string") {
+        return "/";
+    }
+
+    const candidate = value.trim();
+    if (!candidate || !candidate.startsWith("/") || candidate.startsWith("//")) {
+        return "/";
+    }
+
+    try {
+        const parsed = new URL(candidate, "https://manoel-filmes.local");
+        if (parsed.origin !== "https://manoel-filmes.local") {
+            return "/";
+        }
+
+        return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+    } catch {
+        return "/";
+    }
+}
+
+function doesOAuthStateMatchCookie(state: string, cookieState: unknown): boolean {
+    return typeof cookieState === "string" && cookieState === state;
+}
+
+async function ensureUserIsGuildMember(guildId: string, discordUserId: string): Promise<void> {
+    if (!DISCORD_TOKEN) {
+        throw new InfraHttpError("DISCORD_TOKEN não configurado");
+    }
+
+    const response = await fetch(`${DISCORD_API_BASE}/guilds/${guildId}/members/${discordUserId}`, {
+        headers: { Authorization: `Bot ${DISCORD_TOKEN}` },
+    });
+
+    if (response.status === 404) {
+        throw new ForbiddenHttpError("Usuário não pertence ao servidor desta sessão");
+    }
+
+    if (!response.ok) {
+        const errorText = await response.text();
+        logger.error("OAuth", `Falha ao validar membro do servidor: ${response.status} - ${errorText}`);
+        throw new InfraHttpError("Falha ao validar acesso ao servidor");
+    }
 }
 
 async function exchangeCodeForToken(code: string): Promise<DiscordTokenResponse> {
@@ -105,19 +176,14 @@ export function createOAuthRouter(deps: OAuthDeps): Router {
         try {
             validateOAuthConfig();
 
-            const redirect = typeof req.query.redirect === "string" ? req.query.redirect : "/";
+            const redirect = normalizeOAuthRedirect(req.query.redirect);
             const roomIdMatch = redirect.match(/\/room\/([^/?]+)/);
             const roomId = roomIdMatch ? roomIdMatch[1] : "none";
 
             const state = generateOAuthState(roomId);
 
-            res.cookie("oauth_redirect", redirect, {
-                httpOnly: true,
-                secure: process.env.NODE_ENV === "production",
-                sameSite: "lax",
-                maxAge: 10 * 60 * 1000, // 10 minutos
-                path: "/",
-            });
+            res.cookie(OAUTH_REDIRECT_COOKIE_NAME, redirect, getOAuthCookieOptions());
+            res.cookie(OAUTH_STATE_COOKIE_NAME, state, getOAuthCookieOptions());
 
             const params = new URLSearchParams({
                 client_id: DISCORD_CLIENT_ID || "",
@@ -141,13 +207,17 @@ export function createOAuthRouter(deps: OAuthDeps): Router {
             validateOAuthConfig();
 
             const { code, state, error: oauthError, error_description } = req.query;
+            const redirect = normalizeOAuthRedirect(req.cookies?.[OAUTH_REDIRECT_COOKIE_NAME]);
+            const cookieState = req.cookies?.[OAUTH_STATE_COOKIE_NAME];
 
             if (oauthError) {
                 logger.warn("OAuth", `Discord retornou erro: ${oauthError} - ${error_description}`);
 
                 if (oauthError === "access_denied") {
-                    const redirect = req.cookies?.oauth_redirect || "/";
-                    res.clearCookie("oauth_redirect");
+                    if (typeof state !== "string" || !doesOAuthStateMatchCookie(state, cookieState) || !validateOAuthState(state)) {
+                        clearOAuthFlowCookies(res);
+                        return res.redirect("/login.html?error=invalid_request");
+                    }
 
                     const params = new URLSearchParams({
                         client_id: DISCORD_CLIENT_ID || "",
@@ -161,15 +231,23 @@ export function createOAuthRouter(deps: OAuthDeps): Router {
                     return res.redirect(`${DISCORD_OAUTH_AUTHORIZE}?${params.toString()}`);
                 }
 
+                clearOAuthFlowCookies(res);
                 return res.redirect(`/login.html?error=${encodeURIComponent(String(oauthError))}`);
             }
 
             if (typeof code !== "string" || typeof state !== "string") {
-                throw new ValidationHttpError("Parâmetros inválidos no callback");
+                clearOAuthFlowCookies(res);
+                return res.redirect("/login.html?error=invalid_request");
+            }
+
+            if (!doesOAuthStateMatchCookie(state, cookieState)) {
+                clearOAuthFlowCookies(res);
+                throw new ForbiddenHttpError("State inválido para esta sessão de login");
             }
 
             const roomId = validateOAuthState(state);
             if (!roomId) {
+                clearOAuthFlowCookies(res);
                 throw new ForbiddenHttpError("State inválido ou expirado");
             }
 
@@ -181,9 +259,7 @@ export function createOAuthRouter(deps: OAuthDeps): Router {
 
             logger.success("OAuth", `Login bem-sucedido: ${discordUser.username} (${discordUser.id})`);
 
-            const redirect = req.cookies?.oauth_redirect || "/";
-            res.clearCookie("oauth_redirect");
-
+            clearOAuthFlowCookies(res);
             res.redirect(redirect);
         } catch (error) {
             sendRouteError(res, error, "OAuth");
@@ -222,7 +298,7 @@ export function createOAuthRouter(deps: OAuthDeps): Router {
         }
     });
 
-    router.post("/oauth/authorize-room/:roomId", (req, res) => {
+    router.post("/oauth/authorize-room/:roomId", async (req, res) => {
         try {
             const { roomId } = req.params;
 
@@ -234,6 +310,8 @@ export function createOAuthRouter(deps: OAuthDeps): Router {
             if (!room || !room.discordSession) {
                 return res.status(404).json({ error: "Sessão não encontrada" });
             }
+
+            await ensureUserIsGuildMember(room.discordSession.guildId, req.oauthSession.discordId);
 
             const avatarUrl = buildDiscordAvatarUrl(
                 req.oauthSession.discordId,

@@ -2,9 +2,40 @@ import {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
+  LabelBuilder,
+  ModalBuilder,
   StringSelectMenuBuilder,
+  StringSelectMenuOptionBuilder,
 } from "discord.js";
 import { getNotaEmoji, getButtonStyle } from "../utils";
+
+const recommendationGenres = [
+  "Ação",
+  "Animação",
+  "Aventura",
+  "Cinema TV",
+  "Comédia",
+  "Crime",
+  "Documentário",
+  "Drama",
+  "Família",
+  "Fantasia",
+  "Faroeste",
+  "Ficção científica",
+  "Guerra",
+  "História",
+  "Mistério",
+  "Música",
+  "Romance",
+  "Suspense",
+  "Terror",
+  "Thriller",
+  "Talk",
+  "Reality",
+  "Soap",
+  "News",
+  "War & Politics",
+];
 
 export const buildVotingComponents = (movieId: string) => {
   const row1 = new ActionRowBuilder<ButtonBuilder>();
@@ -102,7 +133,7 @@ export const buildWatchlistComponents = (page: number, total: number) => {
 export const buildRecommendationSelectComponents = (recomendacoes: { titulo: string; motivo: string }[]) => {
   const select = new StringSelectMenuBuilder()
     .setCustomId("rec_select")
-    .setPlaceholder("🔍 Ver detalhes de um filme...")
+    .setPlaceholder("🔍 Ver detalhes da recomendação...")
     .setMinValues(1)
     .setMaxValues(1);
 
@@ -115,6 +146,73 @@ export const buildRecommendationSelectComponents = (recomendacoes: { titulo: str
   });
 
   return [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select)];
+};
+
+export const buildRecommendationModal = () => {
+  const quantityOptions = Array.from({ length: 10 }, (_, index) =>
+    new StringSelectMenuOptionBuilder()
+      .setLabel(`${index + 1} ${index === 0 ? "item" : "itens"}`)
+      .setValue(String(index + 1))
+      .setDefault(index === 4)
+  );
+
+  const genreOptions = [
+    new StringSelectMenuOptionBuilder().setLabel("Todos os gêneros").setValue("all").setDefault(true),
+    ...recommendationGenres.slice(0, 24).map((genre) =>
+      new StringSelectMenuOptionBuilder().setLabel(genre).setValue(genre)
+    ),
+  ];
+
+  const includeSeriesOptions = [
+    new StringSelectMenuOptionBuilder()
+      .setLabel("Não")
+      .setDescription("Recomendar apenas filmes")
+      .setValue("no")
+      .setDefault(true),
+    new StringSelectMenuOptionBuilder()
+      .setLabel("Sim")
+      .setDescription("Permitir filmes e séries")
+      .setValue("yes"),
+  ];
+
+  return new ModalBuilder()
+    .setTitle("Configurar Recomendações")
+    .setCustomId("recommend_modal")
+    .addLabelComponents(
+      new LabelBuilder()
+        .setLabel("Quantidade")
+        .setDescription("Defina quantas recomendações devem ser geradas")
+        .setStringSelectMenuComponent(
+          new StringSelectMenuBuilder()
+            .setCustomId("recommend_quantity")
+            .setPlaceholder("Escolha a quantidade")
+            .setMinValues(1)
+            .setMaxValues(1)
+            .addOptions(quantityOptions)
+        ),
+      new LabelBuilder()
+        .setLabel("Gênero")
+        .setDescription("Opcionalmente filtre as recomendações por gênero")
+        .setStringSelectMenuComponent(
+          new StringSelectMenuBuilder()
+            .setCustomId("recommend_genre")
+            .setPlaceholder("Escolha um gênero")
+            .setMinValues(1)
+            .setMaxValues(1)
+            .addOptions(genreOptions)
+        ),
+      new LabelBuilder()
+        .setLabel("Incluir séries")
+        .setDescription("Por padrão, o bot recomenda apenas filmes")
+        .setStringSelectMenuComponent(
+          new StringSelectMenuBuilder()
+            .setCustomId("recommend_include_series")
+            .setPlaceholder("Permitir séries?")
+            .setMinValues(1)
+            .setMaxValues(1)
+            .addOptions(includeSeriesOptions)
+        )
+    );
 };
 
 export const buildConfirmRow = (

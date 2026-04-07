@@ -1,5 +1,6 @@
 import { existsSync, readdirSync } from "fs";
-import { join } from "path";
+import { basename, join } from "path";
+import sanitizeFilename from "sanitize-filename";
 
 export function getSubtitlesDir(uploadsDir: string, roomId: string): string {
   return join(uploadsDir, `${roomId}_subtitles`);
@@ -31,5 +32,7 @@ export function getPartPath(chunksDir: string): string {
 }
 
 export function sanitizeUploadFilename(name: string): string {
-  return name.replace(/[^a-zA-Z0-9._-]/g, "_");
+  const normalizedName = basename(name).trim();
+  const safeName = sanitizeFilename(normalizedName);
+  return safeName || "upload.bin";
 }

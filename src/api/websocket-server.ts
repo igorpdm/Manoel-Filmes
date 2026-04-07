@@ -1,10 +1,12 @@
 import { WebSocketServer, WebSocket } from "ws";
 import { IncomingMessage, Server } from "http";
+import { parse as parseCookieHeader } from "cookie";
 import type { ExtendedWebSocket } from "../shared/types";
 import { roomManager } from "../core/room-manager";
 import { handleWebSocketMessage } from "./websocket-handler";
 import { buildSessionStatusData } from "./services/session-status";
 import { logger } from "../shared/logger";
+import { decodeSession, SESSION_COOKIE_NAME } from "./http/session-middleware";
 
 const HOST_CHECK_INTERVAL = 15000;
 const HEARTBEAT_INTERVAL = 30000;
@@ -105,6 +107,68 @@ function sendInitialState(ws: ExtendedWebSocket, roomId: string, isHost: boolean
     }
 }
 
+function getRoomTokenFromUpgradeHeader(request: IncomingMessage): string {
+    const roomHeader = request.headers["x-room-token"];
+    return typeof roomHeader === "string" ? roomHeader.trim() : "";
+}
+
+function isAllowedUpgradeOrigin(request: IncomingMessage, hasHeaderToken: boolean): boolean {
+    const origin = request.headers.origin;
+    if (!origin) {
+        return hasHeaderToken;
+    }
+
+    const host = request.headers.host;
+    if (!host) {
+        return false;
+    }
+
+    const forwardedProto = request.headers["x-forwarded-proto"];
+    const protocol = typeof forwardedProto === "string"
+        ? forwardedProto.split(",")[0].trim()
+        : ((request.socket as { encrypted?: boolean }).encrypted ? "https" : "http");
+
+    try {
+        const parsedOrigin = new URL(origin);
+        return parsedOrigin.origin === `${protocol}://${host}`;
+    } catch {
+        return false;
+    }
+}
+
+function resolveUpgradeAuthentication(
+    request: IncomingMessage,
+    roomId: string
+): { token: string; discordUser: NonNullable<ExtendedWebSocket["data"]["discordUser"]> } | null {
+    const headerToken = getRoomTokenFromUpgradeHeader(request);
+    if (headerToken) {
+        const headerUser = roomManager.validateToken(roomId, headerToken);
+        return headerUser ? { token: headerToken, discordUser: headerUser } : null;
+    }
+
+    const cookieHeader = request.headers.cookie;
+    if (typeof cookieHeader !== "string" || !cookieHeader.trim()) {
+        return null;
+    }
+
+    const cookies = parseCookieHeader(cookieHeader);
+    const sessionCookie = cookies[SESSION_COOKIE_NAME];
+    const oauthSession = sessionCookie ? decodeSession(sessionCookie) : null;
+    if (!oauthSession) {
+        return null;
+    }
+
+    const authorized = roomManager.findAuthorizedUserByDiscordId(roomId, oauthSession.discordId);
+    if (!authorized) {
+        return null;
+    }
+
+    return {
+        token: authorized.token,
+        discordUser: authorized.user,
+    };
+}
+
 /**
  * Inicializa o servidor WebSocket e todos os ticks de sincronização.
  * @param wss Instância do WebSocketServer.
@@ -120,10 +184,16 @@ export function setupWebSocketServer(wss: WebSocketServer, server: Server): void
 
         const roomId = url.searchParams.get("room");
         const clientId = url.searchParams.get("clientId") || "";
-        const token = url.searchParams.get("token") || "";
+        const hasHeaderToken = Boolean(getRoomTokenFromUpgradeHeader(request));
 
         if (!roomId) {
             socket.write("HTTP/1.1 404 Not Found\r\n\r\n");
+            socket.destroy();
+            return;
+        }
+
+        if (!isAllowedUpgradeOrigin(request, hasHeaderToken)) {
+            socket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
             socket.destroy();
             return;
         }
@@ -135,22 +205,16 @@ export function setupWebSocketServer(wss: WebSocketServer, server: Server): void
             return;
         }
 
-        if (!token) {
+        const auth = resolveUpgradeAuthentication(request, roomId);
+        if (!auth) {
             socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
-            socket.destroy();
-            return;
-        }
-
-        const discordUser = roomManager.validateToken(roomId, token);
-        if (!discordUser) {
-            socket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
             socket.destroy();
             return;
         }
 
         wss.handleUpgrade(request, socket, head, (ws) => {
             const extWs = ws as ExtendedWebSocket;
-            extWs.data = { roomId, clientId, token, discordUser: discordUser || undefined };
+            extWs.data = { roomId, clientId, token: auth.token, discordUser: auth.discordUser };
             wss.emit("connection", extWs, request);
         });
     });

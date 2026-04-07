@@ -1,5 +1,5 @@
 import { dom } from './dom.js';
-import { buildRoomUrl, state } from './state.js';
+import { state } from './state.js';
 import { formatTime } from './utils.js';
 import { clearSubtitleState } from './subtitles.js';
 
@@ -166,7 +166,7 @@ export function showPlayer() {
     state.hasVideo = true;
 
     if (!dom.video.src.includes(`/video/${state.roomId}`)) {
-        dom.video.src = buildRoomUrl(`/video/${state.roomId}?t=${Date.now()}`);
+        dom.video.src = `/video/${state.roomId}?t=${Date.now()}`;
         dom.video.preload = 'auto';
         dom.video.load();
     }
@@ -280,25 +280,46 @@ export function renderUserList(users) {
         const div = document.createElement('div');
         div.className = 'user-item';
 
+        const avatarWrapper = document.createElement('div');
+        avatarWrapper.className = 'user-avatar';
+
+        if (u.avatarUrl) {
+            const avatarImage = document.createElement('img');
+            avatarImage.className = 'user-avatar-img';
+            avatarImage.src = u.avatarUrl;
+            avatarImage.alt = u.username;
+            avatarWrapper.appendChild(avatarImage);
+        } else {
+            const avatarInitials = document.createElement('div');
+            avatarInitials.className = 'user-avatar-initials';
+            avatarInitials.textContent = u.username.substring(0, 2).toUpperCase();
+            avatarWrapper.appendChild(avatarInitials);
+        }
+
+        const userInfo = document.createElement('div');
+        userInfo.className = 'user-info';
+
+        const userName = document.createElement('span');
+        userName.className = 'user-name';
+        userName.textContent = u.username;
+        userInfo.appendChild(userName);
+
         let pingClass = 'ping-good';
         if (u.ping > 150) pingClass = 'ping-fair';
         if (u.ping > 300) pingClass = 'ping-poor';
         if (!u.ping || u.ping < 0) pingClass = '';
 
-        const avatarHtml = u.avatarUrl
-            ? `<img class="user-avatar-img" src="${u.avatarUrl}" alt="${u.username}" />`
-            : `<div class="user-avatar-initials">${u.username.substring(0, 2).toUpperCase()}</div>`;
+        const pingBadge = document.createElement('div');
+        pingBadge.className = `ping-badge ${pingClass}`.trim();
 
-        div.innerHTML = `
-            <div class="user-avatar">${avatarHtml}</div>
-            <div class="user-info">
-                <span class="user-name">${u.username}</span>
-            </div>
-            <div class="ping-badge ${pingClass}">
-                <span class="ping-dot"></span>
-                ${u.ping > 0 ? u.ping + ' ms' : '--'}
-            </div>
-        `;
+        const pingDot = document.createElement('span');
+        pingDot.className = 'ping-dot';
+        pingBadge.appendChild(pingDot);
+        pingBadge.append(document.createTextNode(u.ping > 0 ? `${u.ping} ms` : '--'));
+
+        div.appendChild(avatarWrapper);
+        div.appendChild(userInfo);
+        div.appendChild(pingBadge);
         dom.usersList.appendChild(div);
     });
 }
@@ -334,20 +355,30 @@ export function showRatingModal() {
 }
 
 export function showRatingsResults(ratings, average) {
-    dom.ratingsList.innerHTML = ratings.map(r => {
-        const stars = Array(10).fill(0).map((_, i) =>
+    dom.ratingsList.innerHTML = '';
+
+    ratings.forEach(r => {
+        const ratingItem = document.createElement('div');
+        ratingItem.className = 'rating-item';
+
+        const ratingName = document.createElement('span');
+        ratingName.className = 'rating-item-name';
+        ratingName.textContent = r.username;
+
+        const ratingStars = document.createElement('div');
+        ratingStars.className = 'rating-item-stars';
+        ratingStars.style.color = '#fca311';
+        ratingStars.style.display = 'flex';
+        ratingStars.innerHTML = Array(10).fill(0).map((_, i) =>
             i < r.rating
                 ? '<svg viewBox="0 0 24 24" style="width:12px;height:12px;fill:#fca311"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>'
                 : '<svg viewBox="0 0 24 24" style="width:12px;height:12px;fill:#e2e8f0"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>'
         ).join('');
 
-        return `
-            <div class="rating-item">
-                <span class="rating-item-name">${r.username}</span>
-                <div class="rating-item-stars" style="color: #fca311; display:flex;">${stars}</div>
-            </div>
-        `;
-    }).join('');
+        ratingItem.appendChild(ratingName);
+        ratingItem.appendChild(ratingStars);
+        dom.ratingsList.appendChild(ratingItem);
+    });
 
     dom.ratingsAverage.innerHTML = `
         <div class="ratings-average-label">Média do Grupo</div>

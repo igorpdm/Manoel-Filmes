@@ -61,7 +61,7 @@ export const handleSelectMenu = async (interaction: AnySelectMenuInteraction) =>
     await interaction.deferReply();
 
     const index = Number(interaction.values[0]);
-    const rec = cached.recomendacoes[index];
+    const rec = cached.recommendations[index];
     if (!rec) {
       await interaction.followUp({ content: "❌ Filme não encontrado." });
       return;
@@ -82,7 +82,7 @@ export const handleSelectMenu = async (interaction: AnySelectMenuInteraction) =>
     const page = Number(interaction.customId.split(":")[1]);
     const index = Number(interaction.values[0]);
     const start = page * 5;
-    const filme = cached.filmes[start + index];
+    const filme = cached.movies[start + index];
 
     if (!filme) {
       await interaction.reply({ content: "❌ Filme não encontrado.", flags: MessageFlags.Ephemeral });

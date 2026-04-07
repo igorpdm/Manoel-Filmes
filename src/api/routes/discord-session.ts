@@ -121,13 +121,6 @@ function parseHostTokenPayload(raw: unknown): HostTokenPayload {
   };
 }
 
-function parseTokenFromQuery(raw: unknown): string {
-  if (Array.isArray(raw)) {
-    return requireNonEmptyString(raw[0], "token");
-  }
-  return requireNonEmptyString(raw, "token");
-}
-
 function parseRoomIdParam(raw: unknown): string {
   if (Array.isArray(raw)) {
     return requireNonEmptyString(raw[0], "roomId");
@@ -188,7 +181,7 @@ export function createDiscordSessionRouter(deps: DiscordSessionDeps): Router {
       res.json({
         roomId: result.roomId,
         hostToken: result.hostToken,
-        url: `/room/${result.roomId}?token=${result.hostToken}`,
+        url: `/room/${result.roomId}`,
       });
     } catch (error) {
       sendRouteError(res, error, "DiscordSession");
@@ -210,7 +203,7 @@ export function createDiscordSessionRouter(deps: DiscordSessionDeps): Router {
 
       res.json({
         token,
-        url: `/room/${roomId}?token=${token}`,
+        url: `/room/${roomId}`,
       });
     } catch (error) {
       sendRouteError(res, error, "DiscordSession");
@@ -220,12 +213,7 @@ export function createDiscordSessionRouter(deps: DiscordSessionDeps): Router {
   router.get("/validate-token/:roomId", validateTokenRateLimit, (req, res) => {
     try {
       const roomId = parseRoomIdParam(req.params.roomId);
-      const token = parseTokenFromQuery(req.query.token);
-
-      const user = deps.roomManager.validateToken(roomId, token);
-      if (!user) {
-        throw new ForbiddenHttpError("Token inválido");
-      }
+      const { user } = requireRoomAccess(deps.roomManager, roomId, req);
 
       res.json({
         discordId: user.discordId,
@@ -447,4 +435,3 @@ export function createDiscordSessionRouter(deps: DiscordSessionDeps): Router {
 
   return router;
 }
-

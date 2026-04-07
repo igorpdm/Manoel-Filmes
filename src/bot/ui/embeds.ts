@@ -181,6 +181,48 @@ export const buildRecommendationsListEmbed = async (recomendacoes: { titulo: str
   return embed;
 };
 
+export const buildRecommendationLoadingEmbed = (
+  quantidade: number,
+  genero: string | null,
+  includeSeries: boolean,
+  currentStep: string,
+  currentDetail: string
+) => {
+  const steps = [
+    "Analisando historico",
+    "Mapeando preferencias",
+    "Explorando possibilidades",
+    "Validando candidatos",
+    "Refinando busca",
+    "Finalizando lista",
+  ];
+  const currentStepIndex = Math.max(steps.indexOf(currentStep), 0);
+  const timeline = steps
+    .map((step, index) => {
+      if (index < currentStepIndex) {
+        return `✅ ${step}`;
+      }
+
+      if (index === currentStepIndex) {
+        return `⏳ ${step}`;
+      }
+
+      return `▫️ ${step}`;
+    })
+    .join("\n");
+
+  return new EmbedBuilder()
+    .setTitle("🤖 Montando recomendações")
+    .setDescription(`${currentDetail}\n\n${timeline}`)
+    .setColor(0xf1c40f)
+    .addFields(
+      { name: "📦 Quantidade", value: String(quantidade), inline: true },
+      { name: "🎭 Gênero", value: genero || "Todos", inline: true },
+      { name: "📺 Incluir séries", value: includeSeries ? "Sim" : "Não", inline: true }
+    )
+    .setFooter({ text: "As recomendações aparecerão aqui quando a análise terminar" });
+};
+
 export const buildRecommendationDetailEmbed = async (titulo: string, motivo: string) => {
   const tmdbInfo = await searchMovieTmdb(titulo);
   const embed = new EmbedBuilder().setTitle(`🎬 ${titulo}`).setColor(0xf1c40f);

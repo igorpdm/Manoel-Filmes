@@ -239,6 +239,11 @@ export class RoomManager {
         return room ? auth.validateToken(room, token) : null;
     }
 
+    findAuthorizedUserByDiscordId(roomId: string, discordId: string): { token: string; user: DiscordUser } | null {
+        const room = this.rooms.get(roomId);
+        return room ? auth.findAuthorizedUserByDiscordId(room, discordId) : null;
+    }
+
     markUserConnected(roomId: string, token: string): void {
         const room = this.rooms.get(roomId);
         if (room) auth.markUserConnected(room, token);

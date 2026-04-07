@@ -1,4 +1,5 @@
 import { TextChannel } from "discord.js";
+import WebSocket from "ws";
 import { activeWatchSession, setActiveWatchSession, ActiveWatchSession } from "../state";
 import * as playerApi from "./player-api";
 import { buildSessionEmbed } from "../ui/embeds";
@@ -85,8 +86,12 @@ function connectToSession(client: any, session: ActiveWatchSession) {
     episodeTransitionMovieName = null;
     episodeTransitionEpisode = null;
 
-    const wsUrl = buildWsUrl(session.roomId, session.hostToken);
-    monitorSocket = new WebSocket(wsUrl);
+    const wsUrl = buildWsUrl(session.roomId);
+    monitorSocket = new WebSocket(wsUrl, {
+        headers: {
+            "x-room-token": session.hostToken,
+        },
+    });
 
     monitorSocket.onopen = () => {
         logger.info("SessionMonitor", `WS aberto: room=${session.roomId}`);
@@ -104,7 +109,8 @@ function connectToSession(client: any, session: ActiveWatchSession) {
 
         let data: any = null;
         try {
-            data = JSON.parse(event.data);
+            const rawData = typeof event.data === "string" ? event.data : event.data.toString();
+            data = JSON.parse(rawData);
         } catch {
             return;
         }
@@ -157,13 +163,13 @@ function connectToSession(client: any, session: ActiveWatchSession) {
     };
 }
 
-function buildWsUrl(roomId: string, token: string): string {
+function buildWsUrl(roomId: string): string {
     const baseUrl = playerApi.getPlayerUrl();
     const wsBase = baseUrl.startsWith("https://")
         ? baseUrl.replace("https://", "wss://")
         : baseUrl.replace("http://", "ws://");
     const clientId = `bot-${Math.random().toString(36).slice(2, 10)}`;
-    return `${wsBase}/ws?room=${roomId}&clientId=${clientId}&token=${token}`;
+    return `${wsBase}/ws?room=${roomId}&clientId=${clientId}`;
 }
 
 function scheduleReconnect(client: any) {

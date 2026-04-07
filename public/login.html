@@ -8,17 +8,20 @@
     <link rel="icon" href="/logo.ico" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap"
+        rel="stylesheet">
     <script src="https://unpkg.com/lucide@latest" defer></script>
     <style>
         :root {
             --discord-color: #5865F2;
             --discord-hover: #4752C4;
-            --bg-color: #020617; /* Slate 950 */
+            --bg-color: #020617;
+            /* Slate 950 */
             --glass-bg: rgba(255, 255, 255, 0.03);
             --glass-border: rgba(255, 255, 255, 0.08);
             --text-main: #ffffff;
-            --text-muted: #94a3b8; /* Slate 400 */
+            --text-muted: #94a3b8;
+            /* Slate 400 */
         }
 
         * {
@@ -43,11 +46,14 @@
         /* Ambient Glow based on Catalog */
         .ambient-glow {
             position: absolute;
-            top: 0; left: 0; right: 0; bottom: 0;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
             overflow: hidden;
             z-index: -1;
             background: radial-gradient(circle at 20% 0%, rgba(59, 130, 246, 0.15) 0%, transparent 50%),
-                        radial-gradient(circle at 80% 100%, rgba(99, 102, 241, 0.1) 0%, transparent 50%);
+                radial-gradient(circle at 80% 100%, rgba(99, 102, 241, 0.1) 0%, transparent 50%);
         }
 
         .login-container {
@@ -61,10 +67,11 @@
             z-index: 10;
         }
 
-        /* Navbar Mock to match Catalog */
         .navbar {
             position: fixed;
-            top: 0; left: 0; right: 0;
+            top: 0;
+            left: 0;
+            right: 0;
             padding: 1.5rem 2rem;
             display: flex;
             align-items: center;
@@ -77,8 +84,8 @@
             height: 40px;
             border-radius: 0.75rem;
             overflow: hidden;
-            box-shadow: 0 0 20px rgba(255,255,255,0.1);
-            background: rgba(0,0,0,0.5);
+            box-shadow: 0 0 20px rgba(255, 255, 255, 0.1);
+            background: rgba(0, 0, 0, 0.5);
             display: flex;
             align-items: center;
             justify-content: center;
@@ -95,16 +102,15 @@
             font-weight: 800;
             letter-spacing: -0.025em;
             color: white;
-            text-shadow: 0 2px 4px rgba(0,0,0,0.5);
+            text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
         }
 
-        /* Main Card (Glass Panel) */
         .glass-panel {
             background: var(--glass-bg);
             backdrop-filter: blur(24px);
             -webkit-backdrop-filter: blur(24px);
             border: 1px solid var(--glass-border);
-            border-radius: 1.5rem; /* 24px */
+            border-radius: 1.5rem;
             padding: 3rem 2.5rem;
             max-width: 440px;
             width: 100%;
@@ -116,7 +122,10 @@
         }
 
         @keyframes slideUp {
-            to { transform: translateY(0); opacity: 1; }
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
         }
 
         .login-title {
@@ -126,7 +135,7 @@
             color: var(--text-main);
             letter-spacing: -0.05em;
             line-height: 1.2;
-            text-shadow: 0 4px 10px rgba(0,0,0,0.3);
+            text-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
         }
 
         .login-subtitle {
@@ -137,16 +146,15 @@
             line-height: 1.6;
         }
 
-        /* Primary Button matched to Catalog */
         .btn-primary {
             display: flex;
             align-items: center;
             justify-content: center;
             gap: 0.75rem;
-            background-color: #2563eb; /* blue-600 */
+            background-color: #2563eb;
             color: white;
             padding: 1rem 2rem;
-            border-radius: 0.75rem; /* 12px */
+            border-radius: 0.75rem;
             font-size: 1.05rem;
             font-weight: 700;
             text-decoration: none;
@@ -158,7 +166,7 @@
         }
 
         .btn-primary:hover {
-            background-color: #3b82f6; /* blue-500 */
+            background-color: #3b82f6;
             transform: translateY(-2px);
             box-shadow: 0 0 30px rgba(37, 99, 235, 0.6);
         }
@@ -188,18 +196,24 @@
         }
 
         @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(-5px); }
-            to { opacity: 1; transform: translateY(0); }
+            from {
+                opacity: 0;
+                transform: translateY(-5px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
         }
 
         .login-info {
             margin-top: 2rem;
             font-size: 0.85rem;
-            color: #64748b; /* slate-500 */
+            color: #64748b;
             font-weight: 400;
         }
 
-        /* Loader matched to Catalog */
         .loading-state {
             display: none;
             flex-direction: column;
@@ -217,7 +231,7 @@
             position: relative;
             margin-bottom: 1.5rem;
         }
-        
+
         .spinner-glow {
             position: absolute;
             inset: 0;
@@ -229,15 +243,22 @@
         }
 
         @keyframes pulse {
-            0%, 100% { opacity: 0.5; }
-            50% { opacity: 0.8; }
+
+            0%,
+            100% {
+                opacity: 0.5;
+            }
+
+            50% {
+                opacity: 0.8;
+            }
         }
 
         .spinner {
             width: 4rem;
             height: 4rem;
             border: 3px solid rgba(255, 255, 255, 0.1);
-            border-top-color: #3b82f6; /* blue-500 */
+            border-top-color: #3b82f6;
             border-radius: 50%;
             animation: spin 1s linear infinite;
             position: relative;
@@ -245,26 +266,37 @@
         }
 
         @keyframes spin {
-            to { transform: rotate(360deg); }
+            to {
+                transform: rotate(360deg);
+            }
         }
 
         .loading-text {
-            color: #cbd5e1; /* slate-300 */
+            color: #cbd5e1;
             font-weight: 500;
             letter-spacing: 0.025em;
         }
 
         @media (max-width: 480px) {
-            .glass-panel { padding: 2.5rem 1.5rem; border-radius: 1.25rem; }
-            .login-title { font-size: 1.75rem; }
-            .navbar { padding: 1rem 1.5rem; }
+            .glass-panel {
+                padding: 2.5rem 1.5rem;
+                border-radius: 1.25rem;
+            }
+
+            .login-title {
+                font-size: 1.75rem;
+            }
+
+            .navbar {
+                padding: 1rem 1.5rem;
+            }
         }
     </style>
 </head>
 
 <body>
     <div class="ambient-glow"></div>
-    
+
     <nav class="navbar">
         <div class="nav-logo-box">
             <img src="/logo.jpg" alt="Manoel Filmes Logo" />
@@ -276,13 +308,15 @@
         <div class="glass-panel">
             <div id="login-content">
                 <h1 class="login-title">Entrar na Sessão</h1>
-                <p class="login-subtitle">Para participar desta sessão, você precisa se identificar utilizando sua conta do Discord.</p>
+                <p class="login-subtitle">Para participar desta sessão, você precisa se identificar utilizando sua conta
+                    do Discord.</p>
 
                 <div id="error-message" class="login-error"></div>
 
                 <a href="#" id="login-btn" class="btn-primary">
                     <svg viewBox="0 0 24 24">
-                        <path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028 14.09 14.09 0 0 0 1.226-1.994.076.076 0 0 0-.041-.106 13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z"/>
+                        <path
+                            d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028 14.09 14.09 0 0 0 1.226-1.994.076.076 0 0 0-.041-.106 13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z" />
                     </svg>
                     Entrar com o Discord
                 </a>
@@ -303,17 +337,35 @@
     </div>
 
     <script>
-        (function() {
+        (function () {
+            function normalizeRedirect(value) {
+                if (typeof value !== 'string') return '/';
+                const trimmed = value.trim();
+                if (!trimmed || !trimmed.startsWith('/') || trimmed.startsWith('//')) {
+                    return '/';
+                }
+
+                try {
+                    const parsed = new URL(trimmed, window.location.origin);
+                    if (parsed.origin !== window.location.origin) {
+                        return '/';
+                    }
+
+                    return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+                } catch {
+                    return '/';
+                }
+            }
+
             const urlParams = new URLSearchParams(window.location.search);
             const error = urlParams.get('error');
-            const redirect = urlParams.get('redirect') || '/';
-            
+            const redirect = normalizeRedirect(urlParams.get('redirect'));
+
             const loginBtn = document.getElementById('login-btn');
             const errorMessage = document.getElementById('error-message');
             const loginContent = document.getElementById('login-content');
             const loadingState = document.getElementById('loading-state');
 
-            // Initialize Lucide icons if loaded
             if (window.lucide) {
                 window.lucide.createIcons();
             }
@@ -325,14 +377,14 @@
                     'server_error': 'Erro no servidor do Discord. Tente novamente em alguns instantes.',
                     'default': 'Ocorreu um erro na autenticação. Tente novamente.'
                 };
-                
+
                 errorMessage.textContent = errorMessages[error] || errorMessages.default;
                 errorMessage.style.display = 'block';
             }
 
             loginBtn.href = `/api/oauth/login?redirect=${encodeURIComponent(redirect)}`;
 
-            loginBtn.addEventListener('click', function() {
+            loginBtn.addEventListener('click', function () {
                 loginContent.style.display = 'none';
                 loadingState.classList.add('active');
             });

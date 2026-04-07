@@ -1,14 +1,14 @@
-// ANSI Color Codes
+// Códigos de cor ANSI
 const RESET = "\x1b[0m";
 const DIM = "\x1b[2m";
 const BOLD = "\x1b[1m";
 
 const COLORS = {
-  info: "\x1b[36m", // Cyan
-  success: "\x1b[32m", // Green
-  warn: "\x1b[33m", // Yellow
-  error: "\x1b[31m", // Red
-  debug: "\x1b[90m", // Gray
+  info: "\x1b[36m", // Ciano
+  success: "\x1b[32m", // Verde
+  warn: "\x1b[33m", // Amarelo
+  error: "\x1b[31m", // Vermelho
+  debug: "\x1b[90m", // Cinza
 };
 
 type LogLevel = "info" | "warn" | "error" | "debug" | "success";
@@ -24,7 +24,7 @@ class Logger {
     const levelColor = COLORS[level];
     const contextTag = `${BOLD}[${context}]${RESET}`;
     
-    // Aligns the output roughly
+    // Mantém o alinhamento visual básico do log
     return `${timestamp} ${levelColor}${level.toUpperCase().padEnd(5)}${RESET} ${contextTag} ${message}`;
   }
 

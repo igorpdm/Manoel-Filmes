@@ -12,7 +12,7 @@ import db from "../../database";
 import { ADMIN_USER_ID } from "../../config";
 import { searchMovieTmdb } from "../services/tmdb";
 import { searchTrailerYoutube } from "../services/youtube";
-import { generateRecommendations } from "../services/gemini";
+import { buildRecommendations } from "../services/recommendations";
 import {
   buildListComponents,
   buildWatchlistComponents,
@@ -33,22 +33,7 @@ import {
   pendingSessionCache,
   activeWatchSession,
 } from "../state";
-
-function buildRecommendationPrompt(historico: string, quantidade: number, genero: string | null): string {
-  const generoInstrucao = genero ? ` no gênero ${genero}` : "";
-  return (
-    `Você é um especialista em filmes. Baseado no histórico de filmes assistidos por um grupo de amigos e suas avaliações, recomende ${quantidade} filmes${generoInstrucao} que eles provavelmente vão gostar.\n\n` +
-    `HISTÓRICO DO GRUPO:\n${historico}\n\n` +
-    "INSTRUÇÕES:\n" +
-    "1. Analise os filmes bem avaliados para entender os gostos do grupo.\n" +
-    "2. Recomende filmes que NÃO estão no histórico.\n" +
-    "3. Para cada recomendação, explique brevemente por que o grupo vai gostar.\n" +
-    "4. Use filmes reais e populares.\n\n" +
-    "FORMATO DE RESPOSTA (JSON):\n" +
-    "{\n  \"recomendacoes\": [\n    {\"titulo\": \"Nome do Filme\", \"motivo\": \"Breve explicação\"}\n  ]\n}\n\n" +
-    "Responda APENAS com o JSON."
-  );
-}
+import { buildRecommendationModal } from "../ui/components";
 
 export const handleChatInputCommand = async (interaction: ChatInputCommandInteraction) => {
   const { commandName } = interaction;
@@ -80,8 +65,8 @@ export const handleChatInputCommand = async (interaction: ChatInputCommandIntera
           inline: false,
         },
         {
-          name: "🤖 /recomendar `quantidade` `gênero`",
-          value: "Receba recomendações de filmes baseadas no histórico do grupo. Quantidade e gênero são opcionais.",
+          name: "🤖 /recomendar",
+          value: "Abre um modal para escolher quantidade, gênero e se deseja incluir séries nas recomendações.",
           inline: false,
         },
         {
@@ -207,7 +192,7 @@ export const handleChatInputCommand = async (interaction: ChatInputCommandIntera
     const message = await interaction.fetchReply();
 
     listCache.set(message.id, {
-      filmes,
+      movies: filmes,
       page,
       botAvatarUrl: interaction.client.user?.displayAvatarURL(),
     });
@@ -389,52 +374,16 @@ export const handleChatInputCommand = async (interaction: ChatInputCommandIntera
   }
 
   if (commandName === "recomendar") {
-    await interaction.deferReply();
-    const quantidade = interaction.options.getInteger("quantidade") || 5;
-    const genero = interaction.options.getString("genero");
-
     const filmesDb = await db.getAllMoviesWithRatings();
     if (!filmesDb.length) {
-      await interaction.followUp({
+      await interaction.reply({
         content: "❌ Nenhum filme registrado ainda! Registre alguns filmes primeiro usando `/registrar`.",
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
 
-    const historico = filmesDb
-      .filter((filme) => filme.avaliacoes.length)
-      .map((filme) => {
-        const notas = filme.avaliacoes.map((av) => av.score);
-        const media = notas.reduce((acc, value) => acc + value, 0) / notas.length;
-        const detalhes = filme.avaliacoes.map((av) => `${av.user_name}: ${av.score}/10`).join(", ");
-        return `- ${filme.title}: Média ${media.toFixed(1)}/10 (Avaliações: ${detalhes})`;
-      })
-      .join("\n");
-
-    const prompt = buildRecommendationPrompt(historico, quantidade, genero);
-
-    try {
-      let text = await generateRecommendations(prompt);
-      if (text.startsWith("```")) {
-        text = text.split("```")[1] || text;
-        if (text.startsWith("json")) {
-          text = text.slice(4);
-        }
-      }
-      const data = JSON.parse(text);
-      const recomendacoes = data.recomendacoes || [];
-
-      if (!recomendacoes.length) {
-        await interaction.followUp({ content: "❌ Não foi possível gerar recomendações." });
-        return;
-      }
-
-      const embed = await buildRecommendationsListEmbed(recomendacoes);
-      const components = buildRecommendationSelectComponents(recomendacoes);
-      const message = await interaction.followUp({ embeds: [embed], components });
-      recCache.set(message.id, { recomendacoes });
-    } catch (error: any) {
-      await interaction.followUp({ content: `❌ Erro ao gerar recomendações: ${error.message}` });
-    }
+    await interaction.showModal(buildRecommendationModal());
+    return;
   }
 };

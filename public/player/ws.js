@@ -134,7 +134,7 @@ function stopHostHeartbeat() {
 async function fetchUserDiscordId() {
     if (!state.userToken || state.currentDiscordId) return;
     try {
-        const res = await fetch(`/api/validate-token/${state.roomId}?token=${state.userToken}`, {
+        const res = await fetch(`/api/validate-token/${state.roomId}`, {
             headers: buildRoomHeaders()
         });
         if (res.ok) {
@@ -294,7 +294,7 @@ export function connectWebSocket() {
         return;
     }
 
-    const wsUrl = `${state.wsProtocol}//${window.location.host}/ws?room=${state.roomId}&clientId=${state.clientId}&token=${encodeURIComponent(state.userToken)}`;
+    const wsUrl = `${state.wsProtocol}//${window.location.host}/ws?room=${state.roomId}&clientId=${state.clientId}`;
     state.ws = new WebSocket(wsUrl);
 
     state.ws.onopen = () => {

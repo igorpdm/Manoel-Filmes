@@ -27,15 +27,7 @@ export const registerCommands = async (client: any) => {
       ),
     new SlashCommandBuilder()
       .setName("recomendar")
-      .setDescription("Receber recomendações de filmes baseadas no histórico do grupo")
-      .addIntegerOption((option) =>
-        option
-          .setName("quantidade")
-          .setDescription("Número de recomendações (1-10, padrão: 5)")
-          .setMinValue(1)
-          .setMaxValue(10)
-      )
-      .addStringOption((option) => option.setName("genero").setDescription("Gênero específico (opcional)")),
+      .setDescription("Configurar e receber recomendações baseadas no histórico do grupo"),
     new SlashCommandBuilder()
       .setName("watchlist")
       .setDescription("Gerenciar lista de filmes para assistir")

@@ -22,15 +22,6 @@ export function buildRoomHeaders(extraHeaders = {}) {
     };
 }
 
-export function buildRoomUrl(path) {
-    if (!state.userToken) {
-        return path;
-    }
-
-    const separator = path.includes('?') ? '&' : '?';
-    return `${path}${separator}token=${encodeURIComponent(state.userToken)}`;
-}
-
 export const constants = {
     REMOTE_COOLDOWN: 500,
     EWMA_ALPHA: 0.2,
