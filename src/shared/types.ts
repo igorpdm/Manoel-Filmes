@@ -93,10 +93,20 @@ export interface EpisodeRating {
 export interface DiscordUser {
     discordId: string;
     username: string;
+    avatarUrl: string | null;
     isHost: boolean;
     connected: boolean;
     connectedAt: number;
     ping?: number;
+}
+
+export interface OAuthSession {
+    discordId: string;
+    username: string;
+    avatarHash: string | null;
+    globalName: string | null;
+    createdAt: number;
+    expiresAt: number;
 }
 
 export interface ClientMetrics {

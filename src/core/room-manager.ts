@@ -69,6 +69,7 @@ export class RoomManager {
         const hostUser: DiscordUser = {
             discordId: discordSession.hostDiscordId,
             username: discordSession.hostUsername || 'Host',
+            avatarUrl: null,
             isHost: true,
             connected: false,
             connectedAt: Date.now(),
@@ -200,10 +201,37 @@ export class RoomManager {
 
     // ─── Auth ─────────────────────────────────────────────────────────────────
 
-    generateUserToken(roomId: string, discordId: string, username: string): string | null {
+    generateUserToken(roomId: string, discordId: string, username: string, avatarUrl: string | null = null): string | null {
         const room = this.rooms.get(roomId);
         if (!room || !room.discordSession) return null;
-        return auth.generateUserToken(room, discordId, username);
+        return auth.generateUserToken(room, discordId, username, avatarUrl);
+    }
+
+    authorizeUserByOAuth(roomId: string, discordId: string, username: string, avatarUrl: string | null): string | null {
+        const room = this.rooms.get(roomId);
+        if (!room || !room.discordSession) return null;
+
+        for (const [token, user] of room.tokenMap) {
+            if (user.discordId === discordId) {
+                user.username = username;
+                user.avatarUrl = avatarUrl;
+                return token;
+            }
+        }
+
+        return auth.generateUserToken(room, discordId, username, avatarUrl);
+    }
+
+    updateUserAvatar(roomId: string, discordId: string, avatarUrl: string | null): void {
+        const room = this.rooms.get(roomId);
+        if (!room) return;
+
+        for (const user of room.tokenMap.values()) {
+            if (user.discordId === discordId) {
+                user.avatarUrl = avatarUrl;
+                break;
+            }
+        }
     }
 
     validateToken(roomId: string, token: string): DiscordUser | null {

@@ -131,19 +131,20 @@ export const buildConfirmRow = (
   ];
 };
 
-export const buildSessionComponents = (roomId: string, status: "waiting" | "playing" | "ended") => {
+export const buildSessionComponents = (roomId: string, status: "waiting" | "playing" | "ended", playerBaseUrl: string) => {
   if (status === "ended") {
     return [];
   }
 
   const buttonLabel = status === "waiting" ? "🎬 Entrar na Sessão" : "📺 Assistir Agora";
+  const sessionUrl = `${playerBaseUrl}/room/${roomId}`;
 
   return [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
-        .setCustomId(`session_join:${roomId}`)
         .setLabel(buttonLabel)
-        .setStyle(ButtonStyle.Primary)
+        .setStyle(ButtonStyle.Link)
+        .setURL(sessionUrl)
     ),
   ];
 };

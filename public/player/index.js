@@ -1,5 +1,5 @@
 import { dom } from './dom.js';
-import { buildRoomHeaders, state, constants } from './state.js';
+import { buildRoomHeaders, state, constants, initAuth } from './state.js';
 import {
     initSidebar,
     updateHostUI,
@@ -592,7 +592,10 @@ function bindNextEpisodeFlow() {
     });
 }
 
-function init() {
+async function init() {
+    const authenticated = await initAuth();
+    if (!authenticated) return;
+
     initSidebar();
     initSubtitles();
     initUpscaler();

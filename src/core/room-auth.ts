@@ -10,7 +10,7 @@ export function validateToken(room: Room, token: string): DiscordUser | null {
     return room.tokenMap.get(token) || null;
 }
 
-export function generateUserToken(room: Room, discordId: string, username: string): string {
+export function generateUserToken(room: Room, discordId: string, username: string, avatarUrl: string | null = null): string {
     for (const [token, user] of room.tokenMap) {
         if (user.discordId === discordId) return token;
     }
@@ -19,6 +19,7 @@ export function generateUserToken(room: Room, discordId: string, username: strin
     room.tokenMap.set(token, {
         discordId,
         username,
+        avatarUrl,
         isHost: false,
         connected: false,
         connectedAt: 0,

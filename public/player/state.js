@@ -1,6 +1,5 @@
 const roomId = window.location.pathname.split('/')[2];
 const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-const userToken = new URLSearchParams(window.location.search).get('token') || '';
 
 function createClientId() {
     if (window.crypto?.randomUUID) {
@@ -13,23 +12,23 @@ function createClientId() {
 const clientId = createClientId();
 
 export function buildRoomHeaders(extraHeaders = {}) {
-    if (!userToken) {
+    if (!state.userToken) {
         return { ...extraHeaders };
     }
 
     return {
         ...extraHeaders,
-        'x-room-token': userToken
+        'x-room-token': state.userToken
     };
 }
 
 export function buildRoomUrl(path) {
-    if (!userToken) {
+    if (!state.userToken) {
         return path;
     }
 
     const separator = path.includes('?') ? '&' : '?';
-    return `${path}${separator}token=${encodeURIComponent(userToken)}`;
+    return `${path}${separator}token=${encodeURIComponent(state.userToken)}`;
 }
 
 export const constants = {
@@ -50,7 +49,9 @@ export const state = {
     roomId,
     wsProtocol,
     clientId,
-    userToken,
+    userToken: null,
+    oauthUser: null,
+    authInitialized: false,
     ws: null,
     hideControlsTimer: null,
     isDragging: false,
@@ -91,3 +92,65 @@ export const state = {
     episodeHistory: [],
     isEpisodeTransition: false,
 };
+
+/**
+ * Inicializa a autenticação via OAuth.
+ * Verifica se o usuário está logado e autoriza na sala.
+ * Retorna true se autenticado, false se redirecionou para login.
+ */
+export async function initAuth() {
+    try {
+        const meRes = await fetch('/api/oauth/me', { credentials: 'include' });
+        
+        if (meRes.status === 401) {
+            const currentPath = window.location.pathname + window.location.search;
+            window.location.href = `/api/oauth/login?redirect=${encodeURIComponent(currentPath)}`;
+            return false;
+        }
+
+        if (!meRes.ok) {
+            console.error('[Auth] Erro ao verificar sessão:', meRes.status);
+            window.location.href = `/login.html?error=server_error&redirect=${encodeURIComponent(window.location.pathname)}`;
+            return false;
+        }
+
+        state.oauthUser = await meRes.json();
+
+        const authRes = await fetch(`/api/oauth/authorize-room/${state.roomId}`, {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' }
+        });
+
+        if (authRes.status === 404) {
+            console.error('[Auth] Sessão não encontrada');
+            document.body.innerHTML = `
+                <div style="display:flex;justify-content:center;align-items:center;height:100vh;flex-direction:column;color:white;text-align:center;padding:2rem;">
+                    <h1>Sessão não encontrada</h1>
+                    <p style="margin-top:1rem;color:#9ca3af;">Esta sessão não existe ou já foi encerrada.</p>
+                    <button onclick="window.close()" class="btn-primary" style="margin-top:2rem;">Fechar</button>
+                </div>
+            `;
+            return false;
+        }
+
+        if (!authRes.ok) {
+            console.error('[Auth] Erro ao autorizar na sala:', authRes.status);
+            window.location.href = `/login.html?error=auth_failed&redirect=${encodeURIComponent(window.location.pathname)}`;
+            return false;
+        }
+
+        const authData = await authRes.json();
+        state.userToken = authData.token;
+        state.isHost = authData.isHost;
+        state.currentDiscordId = authData.user.discordId;
+        state.authInitialized = true;
+
+        console.log('[Auth] Autenticado como:', authData.user.username, '(host:', authData.isHost, ')');
+        return true;
+    } catch (error) {
+        console.error('[Auth] Erro na autenticação:', error);
+        window.location.href = `/login.html?error=network_error&redirect=${encodeURIComponent(window.location.pathname)}`;
+        return false;
+    }
+}

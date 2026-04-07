@@ -3,10 +3,13 @@ import express from "express";
 import { createServer } from "http";
 import { WebSocketServer } from "ws";
 import { existsSync, mkdirSync } from "fs";
+import cookieParser from "cookie-parser";
 
 import { corsMiddleware } from "./http/cors";
+import { sessionMiddleware } from "./http/session-middleware";
 import { createTmdbRouter } from "./routes/tmdb";
 import { createDiscordSessionRouter } from "./routes/discord-session";
+import { createOAuthRouter } from "./routes/oauth";
 import { createUploadRouter, startUploadCleanup } from "./routes/upload";
 import { createRoomRouter, getSessionStatusData } from "./routes/room";
 import { createVideoRouter } from "./routes/video";
@@ -23,6 +26,7 @@ import {
     TMDB_API_KEY,
     TMDB_BASE_URL,
     TMDB_IMAGE_BASE,
+    SESSION_SECRET,
 } from "../config";
 
 if (!TMDB_API_KEY) {
@@ -33,6 +37,10 @@ if (!TMDB_API_KEY) {
 
 if (!PLAYER_API_SHARED_SECRET) {
     throw new Error("PLAYER_API_SHARED_SECRET ausente. Verifique seu arquivo .env");
+}
+
+if (!SESSION_SECRET || SESSION_SECRET.length < 32) {
+    throw new Error("SESSION_SECRET ausente ou muito curto (mínimo 32 caracteres). Verifique seu arquivo .env");
 }
 
 if (!existsSync(UPLOADS_DIR)) {
@@ -46,6 +54,8 @@ const server = createServer(app);
 const wss = new WebSocketServer({ noServer: true });
 
 app.use(corsMiddleware);
+app.use(cookieParser());
+app.use(sessionMiddleware);
 app.use(express.json());
 
 const tmdbDeps = { apiKey: TMDB_API_KEY || "", baseUrl: TMDB_BASE_URL, imageBase: TMDB_IMAGE_BASE };
@@ -53,6 +63,9 @@ app.use("/api", createTmdbRouter(tmdbDeps));
 
 const discordSessionDeps = { roomManager, getSessionStatusData, uploadsDir: UPLOADS_DIR };
 app.use("/api", createDiscordSessionRouter(discordSessionDeps));
+
+const oauthDeps = { roomManager };
+app.use("/api", createOAuthRouter(oauthDeps));
 
 app.use("/api/upload", createUploadRouter({ roomManager, uploadsDir: UPLOADS_DIR }));
 app.use("/api", createRoomRouter());

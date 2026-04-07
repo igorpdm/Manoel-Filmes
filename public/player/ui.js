@@ -280,15 +280,17 @@ export function renderUserList(users) {
         const div = document.createElement('div');
         div.className = 'user-item';
 
-        const initials = u.username.substring(0, 2).toUpperCase();
-
         let pingClass = 'ping-good';
         if (u.ping > 150) pingClass = 'ping-fair';
         if (u.ping > 300) pingClass = 'ping-poor';
         if (!u.ping || u.ping < 0) pingClass = '';
 
+        const avatarHtml = u.avatarUrl
+            ? `<img class="user-avatar-img" src="${u.avatarUrl}" alt="${u.username}" />`
+            : `<div class="user-avatar-initials">${u.username.substring(0, 2).toUpperCase()}</div>`;
+
         div.innerHTML = `
-            <div class="user-avatar">${initials}</div>
+            <div class="user-avatar">${avatarHtml}</div>
             <div class="user-info">
                 <span class="user-name">${u.username}</span>
             </div>

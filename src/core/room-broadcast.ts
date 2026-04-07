@@ -37,6 +37,7 @@ export function broadcastViewerCount(room: Room, connectedUsers: DiscordUser[]):
         viewers: connectedUsers.map(u => ({
             discordId: u.discordId,
             username: u.username,
+            avatarUrl: u.avatarUrl,
             ping: u.ping
         }))
     });

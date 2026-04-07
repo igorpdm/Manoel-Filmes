@@ -10,6 +10,9 @@ dotenv.config({ path: path.resolve(__dirname, "../../.env") });
 
 export const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
 export const DISCORD_CLIENT_ID = process.env.DISCORD_CLIENT_ID;
+export const DISCORD_CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET || "";
+export const DISCORD_OAUTH_REDIRECT_URI = process.env.DISCORD_OAUTH_REDIRECT_URI || "http://localhost:3000/api/oauth/callback";
+export const SESSION_SECRET = process.env.SESSION_SECRET || "";
 export const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 export const TMDB_API_KEY = process.env.TMDB_API_KEY;
 export const PLAYER_API_SHARED_SECRET = process.env.PLAYER_API_SHARED_SECRET || "";

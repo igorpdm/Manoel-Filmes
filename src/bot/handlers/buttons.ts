@@ -1,8 +1,4 @@
 import {
-  ActionRowBuilder,
-  ButtonBuilder,
-  ButtonStyle,
-  EmbedBuilder,
   GuildMember,
   MessageFlags,
   ButtonInteraction,
@@ -294,7 +290,7 @@ export const handleButton = async (interaction: ButtonInteraction) => {
     await publicMessage.edit({
       content: null,
       embeds: [embed],
-      components: buildSessionComponents(result.roomId, "waiting"),
+      components: buildSessionComponents(result.roomId, "waiting", playerApi.getPlayerUrl()),
     });
 
     await interaction.editReply({
@@ -302,73 +298,6 @@ export const handleButton = async (interaction: ButtonInteraction) => {
     });
 
     pendingSessionCache.delete(interaction.message.id);
-    return;
-  }
-
-  if (customId.startsWith("session_join:")) {
-    const [, roomId] = customId.split(":");
-
-    if (!activeWatchSession || activeWatchSession.roomId !== roomId) {
-      await interaction.reply({ content: "❌ Esta sessão não está mais ativa.", flags: MessageFlags.Ephemeral });
-      return;
-    }
-
-    if (interaction.user.id === activeWatchSession.hostDiscordId) {
-      const playerUrl = playerApi.getPlayerUrl();
-      const hostUrl = `${playerUrl}/room/${roomId}?token=${activeWatchSession.hostToken}`;
-
-      const hostEmbed = new EmbedBuilder()
-        .setTitle("🎬 SESSÃO CRIADA!")
-        .setDescription("**Você é o Host!**\n\nSeu lugar está reservado. Clique abaixo para entrar e iniciar o filme.")
-        .setColor(0xf1c40f)
-        .setFooter({ text: "Somente você vê essa mensagem" });
-
-      const hostRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
-        new ButtonBuilder()
-          .setLabel("Entrar como Host")
-          .setStyle(ButtonStyle.Link)
-          .setURL(hostUrl)
-      );
-
-      await interaction.reply({
-        embeds: [hostEmbed],
-        components: [hostRow],
-        flags: MessageFlags.Ephemeral,
-      });
-      return;
-    }
-
-    const result = await playerApi.generateUserToken(
-      roomId,
-      interaction.user.id,
-      interaction.member instanceof GuildMember ? interaction.member.displayName : interaction.user.username
-    );
-
-    if (!result) {
-      await interaction.reply({ content: "❌ Erro ao gerar seu link. Tente novamente.", flags: MessageFlags.Ephemeral });
-      return;
-    }
-
-    const playerUrl = playerApi.getPlayerUrl();
-    const joinUrl = `${playerUrl}${result.url}`;
-
-    const embed = new EmbedBuilder()
-      .setTitle("🎬 Sala de Cinema")
-      .setDescription("Seu lugar está reservado! Clique no botão abaixo para entrar.")
-      .setColor(0x2ecc71);
-
-    const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder()
-        .setLabel("Entrar na Sessão")
-        .setStyle(ButtonStyle.Link)
-        .setURL(joinUrl)
-    );
-
-    await interaction.reply({
-      embeds: [embed],
-      components: [row],
-      flags: MessageFlags.Ephemeral,
-    });
     return;
   }
 

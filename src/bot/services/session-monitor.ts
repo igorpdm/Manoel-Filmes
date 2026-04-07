@@ -346,7 +346,8 @@ async function updateSessionEmbed(
             session.createdAt
         );
 
-        const components = status === "ended" ? [] : buildSessionComponents(session.roomId, status);
+        const playerBaseUrl = playerApi.getPlayerUrl();
+        const components = status === "ended" ? [] : buildSessionComponents(session.roomId, status, playerBaseUrl);
 
         await message.edit({
             embeds: [embed],
