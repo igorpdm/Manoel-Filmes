@@ -5,147 +5,299 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Login | Manoel Filmes</title>
-    <link rel="stylesheet" href="/styles.css">
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;700&display=swap" rel="stylesheet">
+    <link rel="icon" href="/logo.ico" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/lucide@latest" defer></script>
     <style>
+        :root {
+            --discord-color: #5865F2;
+            --discord-hover: #4752C4;
+            --bg-color: #020617; /* Slate 950 */
+            --glass-bg: rgba(255, 255, 255, 0.03);
+            --glass-border: rgba(255, 255, 255, 0.08);
+            --text-main: #ffffff;
+            --text-muted: #94a3b8; /* Slate 400 */
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Outfit', sans-serif;
+            background: var(--bg-color);
+            color: var(--text-main);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+            overflow: hidden;
+            antialiased: true;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* Ambient Glow based on Catalog */
+        .ambient-glow {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            overflow: hidden;
+            z-index: -1;
+            background: radial-gradient(circle at 20% 0%, rgba(59, 130, 246, 0.15) 0%, transparent 50%),
+                        radial-gradient(circle at 80% 100%, rgba(99, 102, 241, 0.1) 0%, transparent 50%);
+        }
+
         .login-container {
+            flex: 1;
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            min-height: 100vh;
             padding: 2rem;
-            text-align: center;
+            position: relative;
+            z-index: 10;
         }
 
-        .login-card {
-            background: rgba(255, 255, 255, 0.05);
-            border-radius: 16px;
-            padding: 3rem;
-            max-width: 400px;
+        /* Navbar Mock to match Catalog */
+        .navbar {
+            position: fixed;
+            top: 0; left: 0; right: 0;
+            padding: 1.5rem 2rem;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            z-index: 40;
+        }
+
+        .nav-logo-box {
+            width: 40px;
+            height: 40px;
+            border-radius: 0.75rem;
+            overflow: hidden;
+            box-shadow: 0 0 20px rgba(255,255,255,0.1);
+            background: rgba(0,0,0,0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .nav-logo-box img {
             width: 100%;
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255, 255, 255, 0.1);
+            height: 100%;
+            object-fit: cover;
         }
 
-        .login-logo {
-            width: 80px;
-            height: 80px;
-            margin-bottom: 1.5rem;
-            border-radius: 50%;
+        .nav-title {
+            font-size: 1.25rem;
+            font-weight: 800;
+            letter-spacing: -0.025em;
+            color: white;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.5);
+        }
+
+        /* Main Card (Glass Panel) */
+        .glass-panel {
+            background: var(--glass-bg);
+            backdrop-filter: blur(24px);
+            -webkit-backdrop-filter: blur(24px);
+            border: 1px solid var(--glass-border);
+            border-radius: 1.5rem; /* 24px */
+            padding: 3rem 2.5rem;
+            max-width: 440px;
+            width: 100%;
+            text-align: center;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+            transform: translateY(20px);
+            opacity: 0;
+            animation: slideUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        }
+
+        @keyframes slideUp {
+            to { transform: translateY(0); opacity: 1; }
         }
 
         .login-title {
-            font-size: 1.5rem;
-            font-weight: 700;
+            font-size: 2rem;
+            font-weight: 900;
             margin-bottom: 0.5rem;
-            color: var(--text-primary);
+            color: var(--text-main);
+            letter-spacing: -0.05em;
+            line-height: 1.2;
+            text-shadow: 0 4px 10px rgba(0,0,0,0.3);
         }
 
         .login-subtitle {
-            color: var(--text-secondary);
-            margin-bottom: 2rem;
-            font-size: 0.95rem;
+            color: var(--text-muted);
+            margin-bottom: 2.5rem;
+            font-size: 1rem;
+            font-weight: 400;
+            line-height: 1.6;
         }
 
-        .login-btn {
-            display: inline-flex;
+        /* Primary Button matched to Catalog */
+        .btn-primary {
+            display: flex;
             align-items: center;
             justify-content: center;
             gap: 0.75rem;
-            background: #5865F2;
+            background-color: #2563eb; /* blue-600 */
             color: white;
-            padding: 0.875rem 2rem;
-            border-radius: 8px;
-            font-size: 1rem;
-            font-weight: 600;
+            padding: 1rem 2rem;
+            border-radius: 0.75rem; /* 12px */
+            font-size: 1.05rem;
+            font-weight: 700;
             text-decoration: none;
-            transition: background 0.2s, transform 0.1s;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
             width: 100%;
+            border: none;
+            cursor: pointer;
+            box-shadow: 0 0 20px rgba(37, 99, 235, 0.4);
         }
 
-        .login-btn:hover {
-            background: #4752C4;
-            transform: translateY(-1px);
+        .btn-primary:hover {
+            background-color: #3b82f6; /* blue-500 */
+            transform: translateY(-2px);
+            box-shadow: 0 0 30px rgba(37, 99, 235, 0.6);
         }
 
-        .login-btn:active {
+        .btn-primary:active {
             transform: translateY(0);
+            box-shadow: 0 0 10px rgba(37, 99, 235, 0.4);
         }
 
-        .login-btn svg {
-            width: 24px;
-            height: 24px;
+        .btn-primary svg {
+            width: 22px;
+            height: 22px;
+            fill: currentColor;
         }
 
         .login-error {
             background: rgba(239, 68, 68, 0.1);
-            border: 1px solid rgba(239, 68, 68, 0.3);
+            border: 1px solid rgba(239, 68, 68, 0.2);
             color: #f87171;
             padding: 1rem;
-            border-radius: 8px;
-            margin-bottom: 1.5rem;
+            border-radius: 0.75rem;
+            margin-bottom: 2rem;
             font-size: 0.9rem;
+            font-weight: 500;
+            display: none;
+            animation: fadeIn 0.3s ease;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-5px); }
+            to { opacity: 1; transform: translateY(0); }
         }
 
         .login-info {
-            margin-top: 1.5rem;
+            margin-top: 2rem;
             font-size: 0.85rem;
-            color: var(--text-secondary);
+            color: #64748b; /* slate-500 */
+            font-weight: 400;
         }
 
-        .login-info a {
-            color: var(--primary-color);
-            text-decoration: none;
-        }
-
-        .login-info a:hover {
-            text-decoration: underline;
-        }
-
+        /* Loader matched to Catalog */
         .loading-state {
             display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 1rem 0;
         }
 
         .loading-state.active {
-            display: block;
+            display: flex;
+            animation: fadeIn 0.4s ease;
         }
 
-        .loading-state .spinner {
-            width: 40px;
-            height: 40px;
-            margin: 0 auto 1rem;
+        .spinner-container {
+            position: relative;
+            margin-bottom: 1.5rem;
+        }
+        
+        .spinner-glow {
+            position: absolute;
+            inset: 0;
+            background: #3b82f6;
+            border-radius: 50%;
+            filter: blur(16px);
+            opacity: 0.5;
+            animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 0.5; }
+            50% { opacity: 0.8; }
+        }
+
+        .spinner {
+            width: 4rem;
+            height: 4rem;
+            border: 3px solid rgba(255, 255, 255, 0.1);
+            border-top-color: #3b82f6; /* blue-500 */
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            position: relative;
+            z-index: 10;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .loading-text {
+            color: #cbd5e1; /* slate-300 */
+            font-weight: 500;
+            letter-spacing: 0.025em;
+        }
+
+        @media (max-width: 480px) {
+            .glass-panel { padding: 2.5rem 1.5rem; border-radius: 1.25rem; }
+            .login-title { font-size: 1.75rem; }
+            .navbar { padding: 1rem 1.5rem; }
         }
     </style>
 </head>
 
 <body>
-    <div class="background-animation"></div>
+    <div class="ambient-glow"></div>
+    
+    <nav class="navbar">
+        <div class="nav-logo-box">
+            <img src="/logo.jpg" alt="Manoel Filmes Logo" />
+        </div>
+        <span class="nav-title">Manoel Filmes</span>
+    </nav>
+
     <div class="login-container">
-        <div class="login-card">
-            <img src="/logo.jpg" alt="Manoel Filmes" class="login-logo">
-            
+        <div class="glass-panel">
             <div id="login-content">
                 <h1 class="login-title">Entrar na Sessão</h1>
-                <p class="login-subtitle">Faça login com sua conta do Discord para participar da sessão de cinema.</p>
+                <p class="login-subtitle">Para participar desta sessão, você precisa se identificar utilizando sua conta do Discord.</p>
 
-                <div id="error-message" class="login-error" style="display: none;"></div>
+                <div id="error-message" class="login-error"></div>
 
-                <a href="#" id="login-btn" class="login-btn">
-                    <svg viewBox="0 0 24 24" fill="currentColor">
+                <a href="#" id="login-btn" class="btn-primary">
+                    <svg viewBox="0 0 24 24">
                         <path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028 14.09 14.09 0 0 0 1.226-1.994.076.076 0 0 0-.041-.106 13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z"/>
                     </svg>
-                    Entrar com Discord
+                    Entrar com o Discord
                 </a>
 
                 <p class="login-info">
-                    Ao entrar, você concorda com nossos termos de uso.
+                    Ao continuar, você será redirecionado para autorizar o acesso seguro da sua conta.
                 </p>
             </div>
 
             <div id="loading-state" class="loading-state">
-                <div class="spinner"></div>
-                <p>Conectando com Discord...</p>
+                <div class="spinner-container">
+                    <div class="spinner-glow"></div>
+                    <div class="spinner"></div>
+                </div>
+                <p class="loading-text">Transferindo você para o Discord...</p>
             </div>
         </div>
     </div>
@@ -160,6 +312,11 @@
             const errorMessage = document.getElementById('error-message');
             const loginContent = document.getElementById('login-content');
             const loadingState = document.getElementById('loading-state');
+
+            // Initialize Lucide icons if loaded
+            if (window.lucide) {
+                window.lucide.createIcons();
+            }
 
             if (error) {
                 const errorMessages = {

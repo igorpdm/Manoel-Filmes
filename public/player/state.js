@@ -104,7 +104,7 @@ export async function initAuth() {
         
         if (meRes.status === 401) {
             const currentPath = window.location.pathname + window.location.search;
-            window.location.href = `/api/oauth/login?redirect=${encodeURIComponent(currentPath)}`;
+            window.location.href = `/login.html?redirect=${encodeURIComponent(currentPath)}`;
             return false;
         }
 
