@@ -27,3 +27,13 @@ export function formatTime(s) {
     }
     return `${mStr}:${sStr}`;
 }
+
+export function closeWindowOrRedirect(targetPath = '/') {
+    window.close();
+
+    window.setTimeout(() => {
+        if (!document.hidden) {
+            window.location.replace(targetPath);
+        }
+    }, 150);
+}

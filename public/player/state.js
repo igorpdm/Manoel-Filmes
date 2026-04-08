@@ -1,3 +1,5 @@
+import { closeWindowOrRedirect } from './utils.js';
+
 const roomId = window.location.pathname.split('/')[2];
 const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
 
@@ -73,6 +75,9 @@ export const state = {
     lastMouseX: 0,
     lastMouseY: 0,
     selectedRating: 0,
+    ratingProgress: null,
+    ratingCountdownTimer: null,
+    pendingSessionEnd: false,
     estimatedFileSize: 0,
     lastBufferEnd: 0,
     lastBufferTime: Date.now(),
@@ -119,9 +124,14 @@ export async function initAuth() {
                 <div style="display:flex;justify-content:center;align-items:center;height:100vh;flex-direction:column;color:white;text-align:center;padding:2rem;">
                     <h1>Sessão não encontrada</h1>
                     <p style="margin-top:1rem;color:#9ca3af;">Esta sessão não existe ou já foi encerrada.</p>
-                    <button onclick="window.close()" class="btn-primary" style="margin-top:2rem;">Fechar</button>
+                    <button id="btn-close-missing-session" class="btn-primary" style="margin-top:2rem;max-width:420px;">Fechar</button>
                 </div>
             `;
+
+            document.getElementById('btn-close-missing-session')?.addEventListener('click', () => {
+                closeWindowOrRedirect('/');
+            });
+
             return false;
         }
 

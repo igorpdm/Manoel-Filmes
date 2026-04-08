@@ -8,7 +8,7 @@ import {
     showAudioTrackSelection,
     showProcessingProgress,
     showRatingModal,
-    showRatingsResults,
+    showRatingProgress,
     handleSessionEnded,
     renderUserList,
     updatePlayPauseUI,
@@ -146,6 +146,26 @@ async function fetchUserDiscordId() {
     }
 }
 
+function getCurrentRatingParticipant(ratingProgress) {
+    if (!ratingProgress?.participants?.length || !state.currentDiscordId) {
+        return null;
+    }
+
+    return ratingProgress.participants.find((participant) => participant.discordId === state.currentDiscordId) || null;
+}
+
+function shouldRevealRatingProgress(ratingProgress) {
+    if (!ratingProgress) {
+        return false;
+    }
+
+    if (ratingProgress.isClosed) {
+        return true;
+    }
+
+    return getCurrentRatingParticipant(ratingProgress)?.status === 'rated';
+}
+
 function handleMessage(data) {
     switch (data.type) {
         case 'pong':
@@ -244,13 +264,45 @@ function handleMessage(data) {
             dom.video.pause();
             showRatingModal();
             break;
+        case 'rating-progress':
+            if (data.ratingProgress) {
+                state.ratingProgress = data.ratingProgress;
+
+                const currentParticipant = getCurrentRatingParticipant(data.ratingProgress);
+
+                if (
+                    currentParticipant?.status === 'pending' &&
+                    dom.modalRatingEl.classList.contains('hidden') &&
+                    dom.modalRatingResults.classList.contains('hidden')
+                ) {
+                    showRatingModal();
+                }
+
+                if (shouldRevealRatingProgress(data.ratingProgress)) {
+                    showRatingProgress(data.ratingProgress);
+                }
+            }
+            break;
         case 'session-ended':
+            if (state.ratingProgress?.isClosed) {
+                state.pendingSessionEnd = true;
+
+                if (dom.modalRatingResults.classList.contains('hidden')) {
+                    showRatingProgress(state.ratingProgress);
+                }
+
+                break;
+            }
+
             dom.modalRatingEl.classList.add('hidden');
             dom.modalRatingResults.classList.add('hidden');
             handleSessionEnded();
             break;
         case 'all-ratings-received':
-            showRatingsResults(data.ratings, data.average);
+            if (data.ratingProgress) {
+                state.ratingProgress = data.ratingProgress;
+                showRatingProgress(data.ratingProgress);
+            }
             break;
         case 'host-changed':
             const wasHost = state.isHost;
@@ -283,7 +335,10 @@ function handleMessage(data) {
             }
             break;
         case 'episode-ratings-received':
-            showRatingsResults(data.ratings, data.average);
+            if (data.ratingProgress) {
+                state.ratingProgress = data.ratingProgress;
+                showRatingProgress(data.ratingProgress);
+            }
             break;
     }
 }

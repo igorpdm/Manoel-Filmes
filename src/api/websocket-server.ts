@@ -105,6 +105,25 @@ function sendInitialState(ws: ExtendedWebSocket, roomId: string, isHost: boolean
     if (statusData) {
         ws.send(JSON.stringify({ type: "session-status", ...statusData }));
     }
+
+    const ratingProgress = roomManager.getRatingProgress(roomId);
+    if (ratingProgress) {
+        ws.send(JSON.stringify({
+            type: "rating-progress",
+            ratingProgress,
+        }));
+
+        if (ratingProgress.isClosed) {
+            ws.send(JSON.stringify({
+                type: "all-ratings-received",
+                ratings: ratingProgress.ratings,
+                average: ratingProgress.average,
+                allRated: true,
+                completionReason: ratingProgress.completionReason,
+                ratingProgress,
+            }));
+        }
+    }
 }
 
 function getRoomTokenFromUpgradeHeader(request: IncomingMessage): string {

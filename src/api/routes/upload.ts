@@ -28,6 +28,7 @@ const UPLOAD_ID_PATTERN = /^[a-zA-Z0-9_-]+$/;
 
 // Cache de handles de arquivo abertos: uploadId -> { handle, lastUsed }
 const fileHandleCache = new Map<string, { handle: fs.FileHandle, lastUsed: number }>();
+const fileHandleOpenPromises = new Map<string, Promise<fs.FileHandle>>();
 const HANDLE_TTL_MS = 60000; // Fecha handle após 60s sem atividade.
 const activeWriteCounts = new Map<string, number>();
 
@@ -80,13 +81,40 @@ async function getUploadHandle(uploadId: string, partPath: string): Promise<fs.F
     return cached.handle;
   }
 
-  const handle = await fs.open(partPath, "r+");
-  fileHandleCache.set(uploadId, { handle, lastUsed: Date.now() });
-  return handle;
+  const pendingOpen = fileHandleOpenPromises.get(uploadId);
+  if (pendingOpen) {
+    return pendingOpen;
+  }
+
+  const openPromise = fs.open(partPath, "r+")
+    .then((handle) => {
+      fileHandleCache.set(uploadId, { handle, lastUsed: Date.now() });
+      return handle;
+    })
+    .finally(() => {
+      fileHandleOpenPromises.delete(uploadId);
+    });
+
+  fileHandleOpenPromises.set(uploadId, openPromise);
+  return openPromise;
 }
 
 async function closeUploadHandle(uploadId: string) {
   if ((activeWriteCounts.get(uploadId) || 0) > 0) return;
+
+  const pendingOpen = fileHandleOpenPromises.get(uploadId);
+  if (pendingOpen) {
+    try {
+      const handle = await pendingOpen;
+      await handle.close();
+    } catch (e) {
+      logger.error("UploadRoute", `Falha ao fechar handle pendente do upload ${uploadId}`, e);
+    }
+    fileHandleCache.delete(uploadId);
+    fileHandleOpenPromises.delete(uploadId);
+    return;
+  }
+
   const cached = fileHandleCache.get(uploadId);
   if (cached) {
     try {
@@ -586,6 +614,7 @@ export function createUploadRouter(deps: UploadDeps): Router {
     const currentUpload = activeUploadsByRoom.get(roomId);
     if (currentUpload) {
       const currentDir = join(deps.uploadsDir, currentUpload);
+      await closeUploadHandle(currentUpload);
       await removeUpload(deps.uploadsDir, currentDir);
       clearMetaCache(currentUpload);
       activeUploadsByRoom.delete(roomId);
@@ -621,10 +650,13 @@ export function createUploadRouter(deps: UploadDeps): Router {
 
     const partPath = getPartPath(chunksDir);
     const fileHandle = await fs.open(partPath, "w+");
-    if (totalSize > 0) {
-      await fileHandle.truncate(totalSize);
+    try {
+      if (totalSize > 0) {
+        await fileHandle.truncate(totalSize);
+      }
+    } finally {
+      await fileHandle.close();
     }
-    await fileHandle.close();
 
     deps.roomManager.updateState(roomId, {
       isUploading: true,

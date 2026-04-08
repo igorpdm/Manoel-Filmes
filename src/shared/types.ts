@@ -121,6 +121,39 @@ export interface SessionRating {
     rating: number;
 }
 
+export type RatingParticipantStatus = 'pending' | 'rated' | 'timed_out';
+
+export type RatingRoundScope = 'session' | 'episode';
+
+export type RatingRoundCompletionReason = 'all_rated' | 'timeout';
+
+export interface RatingParticipant {
+    discordId: string;
+    username: string;
+    rating: number | null;
+    status: RatingParticipantStatus;
+}
+
+export interface RatingRound {
+    scope: RatingRoundScope;
+    startedAt: number;
+    expiresAt: number;
+    expectedVoters: Array<Pick<DiscordUser, 'discordId' | 'username'>>;
+    isClosed: boolean;
+    completionReason?: RatingRoundCompletionReason;
+}
+
+export interface RatingProgress {
+    scope: RatingRoundScope;
+    startedAt: number;
+    expiresAt: number;
+    isClosed: boolean;
+    completionReason?: RatingRoundCompletionReason;
+    participants: RatingParticipant[];
+    ratings: SessionRating[];
+    average: number;
+}
+
 export interface DiscordSession {
     channelId: string;
     messageId: string;
@@ -142,6 +175,7 @@ export interface Room {
     discordSession?: DiscordSession;
     tokenMap: Map<string, DiscordUser>;
     ratings: SessionRating[];
+    ratingRound?: RatingRound;
     episodeHistory: EpisodeRating[];
     pendingNextEpisode?: SelectedEpisode;
     status: SessionStatus;
@@ -175,6 +209,7 @@ export type MessageType =
     | "host-heartbeat"
     | "session-ended"
     | "session-ending"
+    | "rating-progress"
     | "rating-received"
     | "all-ratings-received"
     | "host-changed"
@@ -216,4 +251,6 @@ export interface WSMessage {
     metrics?: ClientMetrics;
     selectedEpisode?: SelectedEpisode | null;
     episodeHistory?: EpisodeRating[];
+    completionReason?: RatingRoundCompletionReason;
+    ratingProgress?: RatingProgress;
 }

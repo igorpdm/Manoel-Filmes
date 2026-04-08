@@ -12,13 +12,14 @@ import {
     updateSyncStatus,
     updateVolumeUI,
     populateMovieModal,
-    showRatingsResults,
+    showRatingProgress,
     updateNextEpisodeButton
 } from './ui.js';
 import { connectWebSocket, startDriftCorrection, sendCommand, requestState, isFromRemote } from './ws.js';
 import { bindUploadEvents } from './upload.js';
 import { initSubtitles, renderSubtitle, fetchAvailableSubtitles } from './subtitles.js';
 import { initUpscaler } from './upscaler.js';
+import { closeWindowOrRedirect } from './utils.js';
 
 function log(...args) {
     if (location.hostname === 'localhost') {
@@ -334,7 +335,21 @@ function bindSessionModals() {
     });
 
     dom.btnHome.addEventListener('click', () => {
-        window.close();
+        closeWindowOrRedirect('/');
+    });
+}
+
+function showSessionCompletedScreen() {
+    document.body.innerHTML = `
+        <div style="display:flex;justify-content:center;align-items:center;height:100vh;flex-direction:column;color:white;text-align:center;">
+            <h1>Sessão Concluída</h1>
+            <p>Você pode fechar esta aba agora.</p>
+            <button id="btn-close-page" class="btn-primary" style="margin-top:20px;max-width:420px;">Fechar Aba</button>
+        </div>
+    `;
+
+    document.getElementById('btn-close-page')?.addEventListener('click', () => {
+        closeWindowOrRedirect('/');
     });
 }
 
@@ -416,10 +431,10 @@ function bindRatingModal() {
 
             if (res.ok) {
                 const data = await res.json();
-                dom.ratingStatus.textContent = 'Aguardando outros participantes...';
-
-                if (data.allRated) {
-                    showRatingsResults(data.ratings, data.average);
+                if (data.ratingProgress) {
+                    showRatingProgress(data.ratingProgress);
+                } else {
+                    dom.ratingStatus.textContent = 'Aguardando outros participantes...';
                 }
             } else {
                 dom.ratingStatus.textContent = 'Erro ao enviar avaliação';
@@ -432,7 +447,16 @@ function bindRatingModal() {
     });
 
     dom.btnCloseResults?.addEventListener('click', async () => {
+        if (!state.ratingProgress?.isClosed) {
+            return;
+        }
+
         dom.modalRatingResults.classList.add('hidden');
+        if (state.ratingCountdownTimer) {
+            clearInterval(state.ratingCountdownTimer);
+            state.ratingCountdownTimer = null;
+        }
+        state.ratingProgress = null;
 
         if (state.isEpisodeTransition) {
             state.isEpisodeTransition = false;
@@ -451,13 +475,9 @@ function bindRatingModal() {
             return;
         }
 
-        document.body.innerHTML = `
-            <div style="display:flex;justify-content:center;align-items:center;height:100vh;flex-direction:column;color:white;text-align:center;">
-                <h1>Sessão Concluída</h1>
-                <p>Você pode fechar esta aba agora.</p>
-                <button onclick="window.close()" class="btn-primary" style="margin-top:20px;">Fechar Aba</button>
-            </div>
-        `;
+        state.pendingSessionEnd = false;
+
+        showSessionCompletedScreen();
         window.close();
     });
 }

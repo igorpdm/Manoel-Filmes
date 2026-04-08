@@ -15,6 +15,80 @@ function setWaitingOverlayText(title, message) {
     if (waitingMessage) waitingMessage.textContent = message;
 }
 
+function formatCountdown(remainingMs) {
+    const safeRemainingMs = Math.max(0, remainingMs);
+    const totalSeconds = Math.ceil(safeRemainingMs / 1000);
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+}
+
+function clearRatingCountdown() {
+    if (!state.ratingCountdownTimer) {
+        return;
+    }
+
+    clearInterval(state.ratingCountdownTimer);
+    state.ratingCountdownTimer = null;
+}
+
+function updateRatingDeadline(ratingProgress) {
+    if (!dom.ratingsDeadline) {
+        return;
+    }
+
+    clearRatingCountdown();
+
+    if (!ratingProgress || ratingProgress.isClosed) {
+        dom.ratingsDeadline.classList.add('hidden');
+        dom.ratingsDeadline.textContent = '';
+        return;
+    }
+
+    const renderDeadline = () => {
+        const remainingMs = ratingProgress.expiresAt - Date.now();
+        dom.ratingsDeadline.textContent = `Tempo restante: ${formatCountdown(remainingMs)}`;
+
+        if (remainingMs <= 0) {
+            clearRatingCountdown();
+        }
+    };
+
+    dom.ratingsDeadline.classList.remove('hidden');
+    renderDeadline();
+    state.ratingCountdownTimer = setInterval(renderDeadline, 1000);
+}
+
+function renderRatingParticipantStatus(participant) {
+    if (participant.status === 'rated') {
+        const score = document.createElement('span');
+        score.className = 'rating-item-score';
+        score.textContent = `${participant.rating}/10`;
+        return score;
+    }
+
+    if (participant.status === 'timed_out') {
+        const timeout = document.createElement('span');
+        timeout.className = 'rating-item-timeout';
+        timeout.textContent = 'Tempo esgotado';
+        return timeout;
+    }
+
+    const loading = document.createElement('span');
+    loading.className = 'rating-item-loading';
+
+    const spinner = document.createElement('span');
+    spinner.className = 'rating-item-spinner';
+    spinner.setAttribute('aria-hidden', 'true');
+
+    const label = document.createElement('span');
+    label.textContent = 'Aguardando voto';
+
+    loading.appendChild(spinner);
+    loading.appendChild(label);
+    return loading;
+}
+
 function formatAudioTrackLabel(track, index) {
     const language = track.language && track.language !== 'und'
         ? track.language.toUpperCase()
@@ -341,6 +415,11 @@ export function populateMovieModal(movie, episode) {
 }
 
 export function showRatingModal() {
+    if (state.ratingProgress?.isClosed) {
+        state.ratingProgress = null;
+    }
+    state.pendingSessionEnd = false;
+
     if (state.currentMovieInfo) {
         dom.ratingPoster.src = state.currentMovieInfo.posterUrl || '/logo.jpg';
         dom.ratingMovieTitle.textContent = state.currentMovieInfo.title;
@@ -348,57 +427,111 @@ export function showRatingModal() {
         if (state.currentSelectedEpisode) {
             dom.ratingEpisodeInfo.textContent = `S${state.currentSelectedEpisode.seasonNumber}E${state.currentSelectedEpisode.episodeNumber}`;
             dom.ratingEpisodeInfo.classList.remove('hidden');
+        } else {
+            dom.ratingEpisodeInfo.classList.add('hidden');
         }
+    } else {
+        dom.ratingEpisodeInfo.classList.add('hidden');
     }
 
+    clearRatingCountdown();
+    state.selectedRating = 0;
+    if (dom.starsFg) dom.starsFg.style.width = '0%';
+    if (dom.ratingValueDisplay) dom.ratingValueDisplay.textContent = '0';
+    if (dom.btnSubmitRating) dom.btnSubmitRating.disabled = true;
+    if (dom.ratingStatus) {
+        dom.ratingStatus.textContent = '';
+        dom.ratingStatus.classList.add('hidden');
+    }
+
+    dom.modalRatingResults.classList.add('hidden');
     dom.modalRatingEl.classList.remove('hidden');
 }
 
-export function showRatingsResults(ratings, average) {
-    dom.ratingsList.innerHTML = '';
+export function showRatingProgress(ratingProgress) {
+    if (!ratingProgress) {
+        return;
+    }
 
-    ratings.forEach(r => {
-        const ratingItem = document.createElement('div');
-        ratingItem.className = 'rating-item';
+    state.ratingProgress = ratingProgress;
+    updateRatingDeadline(ratingProgress);
 
-        const ratingName = document.createElement('span');
-        ratingName.className = 'rating-item-name';
-        ratingName.textContent = r.username;
+    if (dom.ratingsModalTitle) {
+        dom.ratingsModalTitle.textContent = state.isEpisodeTransition
+            ? '⭐ Avaliações do Episódio'
+            : '⭐ Avaliações da Sessão';
+    }
 
-        const ratingStars = document.createElement('div');
-        ratingStars.className = 'rating-item-stars';
-        ratingStars.style.color = '#fca311';
-        ratingStars.style.display = 'flex';
-        ratingStars.innerHTML = Array(10).fill(0).map((_, i) =>
-            i < r.rating
-                ? '<svg viewBox="0 0 24 24" style="width:12px;height:12px;fill:#fca311"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>'
-                : '<svg viewBox="0 0 24 24" style="width:12px;height:12px;fill:#e2e8f0"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>'
-        ).join('');
+    if (dom.ratingsSummary) {
+        if (ratingProgress.isClosed) {
+            dom.ratingsSummary.textContent = ratingProgress.completionReason === 'timeout'
+                ? 'Tempo de votação encerrado. Os votos pendentes foram desconsiderados.'
+                : 'Todos os votos foram recebidos.';
+        } else {
+            dom.ratingsSummary.textContent = 'Notas atualizadas em tempo real. Aguarde os participantes restantes.';
+        }
+    }
 
-        ratingItem.appendChild(ratingName);
-        ratingItem.appendChild(ratingStars);
-        dom.ratingsList.appendChild(ratingItem);
-    });
+    const participants = ratingProgress.participants || [];
+    if (!participants.length) {
+        dom.ratingsList.innerHTML = '';
+        const emptyItem = document.createElement('div');
+        emptyItem.className = 'rating-item rating-item-empty';
+        emptyItem.textContent = 'Nenhum participante disponível.';
+        dom.ratingsList.appendChild(emptyItem);
+    } else {
+        dom.ratingsList.innerHTML = '';
+
+        participants.forEach((participant) => {
+            const item = document.createElement('div');
+            item.className = 'rating-item';
+
+            const name = document.createElement('span');
+            name.className = 'rating-item-name';
+            name.textContent = participant.username;
+
+            const status = document.createElement('div');
+            status.className = 'rating-item-status';
+            status.appendChild(renderRatingParticipantStatus(participant));
+
+            item.appendChild(name);
+            item.appendChild(status);
+            dom.ratingsList.appendChild(item);
+        });
+    }
+
+    const averageLabel = ratingProgress.isClosed ? 'Média final' : 'Média atual';
+    const averageValue = Number.isFinite(ratingProgress.average) ? ratingProgress.average.toFixed(1) : '0.0';
 
     dom.ratingsAverage.innerHTML = `
-        <div class="ratings-average-label">Média do Grupo</div>
+        <div class="ratings-average-label">${averageLabel}</div>
         <div class="ratings-average-value">
             <svg viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
-            ${average.toFixed(1)}/10
+            ${averageValue}/10
         </div>
     `;
+
+    if (dom.btnCloseResults) {
+        dom.btnCloseResults.classList.toggle('hidden', !ratingProgress.isClosed);
+        dom.btnCloseResults.textContent = state.isEpisodeTransition ? 'Continuar' : 'Fechar';
+    }
 
     dom.modalRatingEl.classList.add('hidden');
     dom.modalRatingResults.classList.remove('hidden');
 }
 
 export function handleSessionEnded() {
+    clearRatingCountdown();
     dom.video.pause();
     dom.video.src = '';
     state.hasVideo = false;
     state.roomStage = 'idle';
     state.audioTracks = [];
+    state.ratingProgress = null;
+    state.pendingSessionEnd = false;
     dom.audioTrackOverlay.classList.add('hidden');
+    dom.modalRatingEl.classList.add('hidden');
+    dom.modalRatingResults.classList.add('hidden');
     dom.modalSessionEnded.classList.remove('hidden');
 }
 
@@ -437,6 +570,7 @@ export function updateNextEpisodeButton() {
 }
 
 export function resetForNextEpisode(selectedEpisode, movieName) {
+    clearRatingCountdown();
     dom.video.pause();
     dom.video.removeAttribute('src');
     dom.video.load();
@@ -446,6 +580,8 @@ export function resetForNextEpisode(selectedEpisode, movieName) {
     state.selectedAudioStreamIndex = null;
     state.audioSelectionErrorMessage = '';
     state.selectedRating = 0;
+    state.ratingProgress = null;
+    state.pendingSessionEnd = false;
     state.isEpisodeTransition = false;
 
     if (selectedEpisode) {

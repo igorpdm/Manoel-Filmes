@@ -1,7 +1,14 @@
 import { Router } from "express";
 import { cleanupRoomUploads } from "./upload";
 import type { RoomManager } from "../../core/room-manager";
-import type { DiscordSession, MovieInfo, SelectedEpisode } from "../../shared/types";
+import type {
+  DiscordSession,
+  MovieInfo,
+  RatingProgress,
+  RatingRoundCompletionReason,
+  RatingRoundScope,
+  SelectedEpisode,
+} from "../../shared/types";
 import type { SessionStatusData } from "../services/session-status";
 import { logger } from "../../shared/logger";
 import { sendRouteError } from "../http/route-error";
@@ -25,6 +32,9 @@ interface DiscordSessionDeps {
 const createSessionRateLimit = createRateLimit({ key: "discord-session-create", limit: 15, windowMs: 60000 });
 const issueTokenRateLimit = createRateLimit({ key: "discord-session-token", limit: 30, windowMs: 60000 });
 const validateTokenRateLimit = createRateLimit({ key: "discord-session-validate", limit: 60, windowMs: 60000 });
+const RATING_TIMEOUT_MS = 2 * 60 * 1000;
+
+const ratingTimeouts = new Map<string, NodeJS.Timeout>();
 
 interface CreateDiscordSessionPayload {
   title: string;
@@ -143,6 +153,94 @@ function ensureHostToken(deps: DiscordSessionDeps, roomId: string, token: string
   }
 }
 
+function clearRatingTimeout(roomId: string): void {
+  const timeout = ratingTimeouts.get(roomId);
+  if (!timeout) return;
+
+  clearTimeout(timeout);
+  ratingTimeouts.delete(roomId);
+}
+
+function broadcastRatingProgress(deps: DiscordSessionDeps, roomId: string, ratingProgress: RatingProgress): void {
+  deps.roomManager.broadcastAll(roomId, {
+    type: "rating-progress",
+    ratingProgress,
+  });
+}
+
+function finishRatingRound(
+  deps: DiscordSessionDeps,
+  roomId: string,
+  completionReason: RatingRoundCompletionReason
+): RatingProgress | null {
+  clearRatingTimeout(roomId);
+
+  const ratingProgress = deps.roomManager.finishRatingRound(roomId, completionReason);
+  if (!ratingProgress) {
+    return null;
+  }
+
+  broadcastRatingProgress(deps, roomId, ratingProgress);
+  deps.roomManager.broadcastAll(roomId, {
+    type: "all-ratings-received",
+    ratings: ratingProgress.ratings,
+    average: ratingProgress.average,
+    allRated: true,
+    completionReason,
+    ratingProgress,
+  });
+
+  return ratingProgress;
+}
+
+function scheduleRatingTimeout(
+  deps: DiscordSessionDeps,
+  roomId: string,
+  scope: RatingRoundScope
+): void {
+  clearRatingTimeout(roomId);
+
+  const timeout = setTimeout(() => {
+    ratingTimeouts.delete(roomId);
+
+    const ratingProgress = deps.roomManager.getRatingProgress(roomId);
+    if (!ratingProgress || ratingProgress.isClosed) {
+      return;
+    }
+
+    logger.info(
+      "DiscordSession",
+      `Timeout de votação atingido: room=${roomId} scope=${scope} votos=${ratingProgress.ratings.length}/${ratingProgress.participants.length}`
+    );
+    finishRatingRound(deps, roomId, "timeout");
+  }, RATING_TIMEOUT_MS);
+
+  ratingTimeouts.set(roomId, timeout);
+}
+
+function startRatingRound(
+  deps: DiscordSessionDeps,
+  roomId: string,
+  scope: RatingRoundScope
+): RatingProgress | null {
+  const currentRatingProgress = deps.roomManager.getRatingProgress(roomId);
+  if (currentRatingProgress) {
+    return currentRatingProgress;
+  }
+
+  const ratingProgress = deps.roomManager.startRatingRound(roomId, scope, RATING_TIMEOUT_MS);
+  if (!ratingProgress) {
+    return null;
+  }
+
+  if (ratingProgress.participants.length === 0) {
+    return finishRatingRound(deps, roomId, "all_rated");
+  }
+
+  scheduleRatingTimeout(deps, roomId, scope);
+  return ratingProgress;
+}
+
 /**
  * Cria rotas HTTP para ciclo de vida de sessões ligadas ao Discord.
  * @param deps Dependências de estado de sala e funções auxiliares de sessão.
@@ -244,38 +342,49 @@ export function createDiscordSessionRouter(deps: DiscordSessionDeps): Router {
       const roomId = parseRoomIdParam(req.params.roomId);
       ensureSessionRoom(deps, roomId);
 
+      const currentRatingProgress = deps.roomManager.getRatingProgress(roomId);
+      if (!currentRatingProgress || currentRatingProgress.isClosed) {
+        throw new ConflictHttpError("A votação não está ativa");
+      }
+
       const payload = parseSessionRatingPayload(req.body);
       const user = deps.roomManager.validateToken(roomId, payload.token);
       if (!user) {
         throw new ForbiddenHttpError("Token inválido");
       }
 
-      deps.roomManager.addRating(roomId, user.discordId, user.username, payload.rating);
+      if (!deps.roomManager.isRatingRoundParticipant(roomId, user.discordId)) {
+        throw new ForbiddenHttpError("Você não faz parte desta votação");
+      }
+
+      const didRegisterRating = deps.roomManager.addRating(roomId, user.discordId, user.username, payload.rating);
+      if (!didRegisterRating) {
+        throw new ConflictHttpError("Não foi possível registrar a nota");
+      }
+
       logger.info(
         "DiscordSession",
         `Nota recebida: room=${roomId} discordId=${user.discordId} rating=${payload.rating}`
       );
 
-      deps.roomManager.broadcastAll(roomId, {
-        type: "rating-received",
-        ratings: deps.roomManager.getRatings(roomId).ratings,
-      });
-
       const allRated = deps.roomManager.allUsersRated(roomId);
+      let ratingProgress = deps.roomManager.getRatingProgress(roomId);
+
       if (allRated) {
-        const { ratings: allRatings, average } = deps.roomManager.getRatings(roomId);
-        logger.info("DiscordSession", `Todas as notas recebidas: room=${roomId} media=${average}`);
-        deps.roomManager.broadcastAll(roomId, {
-          type: "all-ratings-received",
-          ratings: allRatings,
-          average,
-        });
+        logger.info("DiscordSession", `Rodada de notas concluída: room=${roomId}`);
+        ratingProgress = finishRatingRound(deps, roomId, "all_rated");
+      } else if (ratingProgress) {
+        broadcastRatingProgress(deps, roomId, ratingProgress);
       }
+
+      const responseProgress = ratingProgress ?? deps.roomManager.getRatingProgress(roomId);
 
       res.json({
         success: true,
         allRated,
-        ...deps.roomManager.getRatings(roomId),
+        ratings: responseProgress?.ratings ?? [],
+        average: responseProgress?.average ?? 0,
+        ratingProgress: responseProgress,
       });
     } catch (error) {
       sendRouteError(res, error, "DiscordSession");
@@ -291,15 +400,21 @@ export function createDiscordSessionRouter(deps: DiscordSessionDeps): Router {
       ensureHostToken(deps, roomId, payload.token);
 
       deps.roomManager.setSessionStatus(roomId, "ended");
+      const ratingProgress = startRatingRound(deps, roomId, "session");
+
       logger.info("DiscordSession", `Encerramento solicitado: room=${roomId}`);
       deps.roomManager.broadcastAll(roomId, { type: "session-ending" });
+
+      if (ratingProgress && !ratingProgress.isClosed) {
+        broadcastRatingProgress(deps, roomId, ratingProgress);
+      }
 
       const statusData = deps.getSessionStatusData(roomId);
       if (statusData) {
         deps.roomManager.broadcastAll(roomId, { type: "session-status", ...statusData });
       }
 
-      res.json({ success: true, status: "ending" });
+      res.json({ success: true, status: "ending", ratingProgress });
     } catch (error) {
       sendRouteError(res, error, "DiscordSession");
     }
@@ -316,6 +431,8 @@ export function createDiscordSessionRouter(deps: DiscordSessionDeps): Router {
       const { ratings, average } = deps.roomManager.getRatings(roomId);
       logger.info("DiscordSession", `Finalizando sessão: room=${roomId} media=${average}`);
 
+      clearRatingTimeout(roomId);
+      deps.roomManager.clearRatingRound(roomId);
       deps.roomManager.broadcastAll(roomId, { type: "session-ended" });
       await cleanupRoomUploads(deps.uploadsDir, roomId);
       await deps.roomManager.deleteRoom(roomId);
@@ -376,11 +493,17 @@ export function createDiscordSessionRouter(deps: DiscordSessionDeps): Router {
       }
 
       room.pendingNextEpisode = selectedEpisode;
+      const ratingProgress = startRatingRound(deps, roomId, "episode");
+
       logger.info("DiscordSession", `Avaliação de episódio iniciada: room=${roomId}, próximo=T${selectedEpisode.seasonNumber}E${selectedEpisode.episodeNumber}`);
 
       deps.roomManager.broadcastAll(roomId, { type: "episode-ending" });
 
-      res.json({ success: true });
+      if (ratingProgress && !ratingProgress.isClosed) {
+        broadcastRatingProgress(deps, roomId, ratingProgress);
+      }
+
+      res.json({ success: true, ratingProgress });
     } catch (error) {
       sendRouteError(res, error, "DiscordSession");
     }
@@ -400,6 +523,8 @@ export function createDiscordSessionRouter(deps: DiscordSessionDeps): Router {
         return;
       }
 
+      clearRatingTimeout(roomId);
+      deps.roomManager.clearRatingRound(roomId);
       deps.roomManager.saveCurrentEpisodeToHistory(roomId);
       await cleanupRoomUploads(deps.uploadsDir, roomId);
       await deps.roomManager.resetForNextEpisode(roomId);

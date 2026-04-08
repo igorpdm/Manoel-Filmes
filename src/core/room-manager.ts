@@ -11,7 +11,11 @@ import type {
     ClientMetrics,
     ExtendedWebSocket,
     SelectedEpisode,
-    EpisodeRating
+    EpisodeRating,
+    RatingProgress,
+    RatingRoundCompletionReason,
+    RatingRoundScope,
+    RatingParticipant
 } from "../shared/types";
 import { existsSync } from "fs";
 import { rm } from "fs/promises";
@@ -363,6 +367,17 @@ export class RoomManager {
         const room = this.rooms.get(roomId);
         if (!room) return false;
 
+        if (room.ratingRound?.isClosed) {
+            return false;
+        }
+
+        if (
+            room.ratingRound &&
+            !room.ratingRound.expectedVoters.some((user) => user.discordId === discordId)
+        ) {
+            return false;
+        }
+
         const existingIndex = room.ratings.findIndex(r => r.discordId === discordId);
         if (existingIndex >= 0) {
             room.ratings[existingIndex].rating = rating;
@@ -383,9 +398,93 @@ export class RoomManager {
     allUsersRated(roomId: string): boolean {
         const room = this.rooms.get(roomId);
         if (!room) return false;
+
+        if (room.ratingRound) {
+            if (room.ratingRound.isClosed) {
+                return true;
+            }
+
+            if (room.ratingRound.expectedVoters.length === 0) {
+                return true;
+            }
+
+            return room.ratingRound.expectedVoters.every((user) =>
+                room.ratings.some((rating) => rating.discordId === user.discordId)
+            );
+        }
+
         const connectedUsers = auth.getConnectedUsers(room);
         if (connectedUsers.length === 0) return true;
         return connectedUsers.every(user => room.ratings.some(r => r.discordId === user.discordId));
+    }
+
+    startRatingRound(roomId: string, scope: RatingRoundScope, durationMs: number): RatingProgress | null {
+        const room = this.rooms.get(roomId);
+        if (!room) return null;
+
+        if (room.ratingRound && !room.ratingRound.isClosed) {
+            return this.getRatingProgress(roomId);
+        }
+
+        const now = Date.now();
+        const expectedVoters = auth.getConnectedUsers(room).map((user) => ({
+            discordId: user.discordId,
+            username: user.username,
+        }));
+
+        room.ratings = [];
+        room.ratingRound = {
+            scope,
+            startedAt: now,
+            expiresAt: now + durationMs,
+            expectedVoters,
+            isClosed: false,
+        };
+
+        return this.getRatingProgress(roomId);
+    }
+
+    getRatingProgress(roomId: string): RatingProgress | null {
+        const room = this.rooms.get(roomId);
+        const ratingRound = room?.ratingRound;
+        if (!room || !ratingRound) return null;
+
+        const { ratings, average } = this.getRatings(roomId);
+
+        return {
+            scope: ratingRound.scope,
+            startedAt: ratingRound.startedAt,
+            expiresAt: ratingRound.expiresAt,
+            isClosed: ratingRound.isClosed,
+            completionReason: ratingRound.completionReason,
+            participants: this.buildRatingParticipants(room),
+            ratings,
+            average,
+        };
+    }
+
+    isRatingRoundParticipant(roomId: string, discordId: string): boolean {
+        const room = this.rooms.get(roomId);
+        if (!room?.ratingRound) return false;
+
+        return room.ratingRound.expectedVoters.some((user) => user.discordId === discordId);
+    }
+
+    finishRatingRound(roomId: string, completionReason: RatingRoundCompletionReason): RatingProgress | null {
+        const room = this.rooms.get(roomId);
+        if (!room?.ratingRound) return null;
+
+        room.ratingRound.isClosed = true;
+        room.ratingRound.completionReason = completionReason;
+
+        return this.getRatingProgress(roomId);
+    }
+
+    clearRatingRound(roomId: string): void {
+        const room = this.rooms.get(roomId);
+        if (!room) return;
+
+        room.ratingRound = undefined;
     }
 
     // ─── Subtitles ────────────────────────────────────────────────────────────
@@ -472,6 +571,7 @@ export class RoomManager {
         room.state.lastCommandSeq = 0;
         room.state.subtitles = [];
         room.ratings = [];
+        room.ratingRound = undefined;
         room.status = 'waiting';
 
         logger.info("RoomManager", `Sala ${roomId} resetada para próximo episódio`);
@@ -541,6 +641,32 @@ export class RoomManager {
             episodeHistory: [],
             status: 'waiting'
         };
+    }
+
+    private buildRatingParticipants(room: Room): RatingParticipant[] {
+        if (!room.ratingRound) {
+            return [];
+        }
+
+        return room.ratingRound.expectedVoters.map((user) => {
+            const rating = room.ratings.find((currentRating) => currentRating.discordId === user.discordId);
+
+            if (rating) {
+                return {
+                    discordId: user.discordId,
+                    username: rating.username || user.username,
+                    rating: rating.rating,
+                    status: 'rated',
+                };
+            }
+
+            return {
+                discordId: user.discordId,
+                username: user.username,
+                rating: null,
+                status: room.ratingRound?.isClosed ? 'timed_out' : 'pending',
+            };
+        });
     }
 }
 
