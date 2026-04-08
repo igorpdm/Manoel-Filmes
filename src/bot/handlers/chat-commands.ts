@@ -66,7 +66,7 @@ export const handleChatInputCommand = async (interaction: ChatInputCommandIntera
         },
         {
           name: "🤖 /recomendar",
-          value: "Abre um modal para escolher quantidade, gênero e se deseja incluir séries nas recomendações.",
+          value: "Receba recomendações de filmes baseadas no histórico do grupo. Quantidade e gênero são opcionais.",
           inline: false,
         },
         {
