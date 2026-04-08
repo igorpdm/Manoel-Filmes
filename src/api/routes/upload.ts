@@ -1,1181 +1,767 @@
 import { Router } from "express";
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, promises as fs } from "fs";
+import { existsSync, mkdirSync } from "fs";
 import { rm } from "fs/promises";
+import { promises as fs } from "fs";
 import { join, basename, resolve } from "path";
 import type { Request, Response } from "express";
-import { MediaProcessor, AudioTrackConversionError } from "../services/media-processor";
 import { logger } from "../../shared/logger";
 import type { UploadDeps, UploadMeta } from "./upload-types";
-import type { AudioTrackInfo } from "../../shared/types";
 import { getAuthFromRequest, ensureUploadAuthorized } from "./upload-auth";
 import { requireRoomAccess } from "../http/room-access";
 import {
-  decodeSubtitleBuffer,
-  getPartPath,
-  getSubtitlesDir,
-  listRoomUploadDirs,
-  sanitizeUploadFilename,
+    decodeSubtitleBuffer,
+    getPartPath,
+    getSubtitlesDir,
+    sanitizeUploadFilename,
 } from "./upload-paths";
+import { getUploadHandle, closeUploadHandle, activeWriteCounts } from "./upload-handle-cache";
+import {
+    getOrLoadMeta,
+    syncMetaToDisk,
+    clearMetaCache,
+    initMetaCache,
+    getMetaFromCache,
+    getReceivedChunkSet,
+    markChunkReceived,
+    markActivity,
+    persistMeta,
+} from "./upload-meta-store";
+import { computeUploadProgress, maybeBroadcastUploadProgress } from "./upload-progress";
+import { startRoomProcessing, getRoomProcessingResponse } from "./upload-media";
+import { removeUpload, cleanupRoomUploads as _cleanupRoomUploads, isPathInsideUploadsDir } from "./upload-cleanup";
 
-const activeUploadsByRoom = new Map<string, string>();
-const UPLOAD_TTL_MS = 30 * 60 * 1000;
-const CLEANUP_INTERVAL = 5 * 60 * 1000;
+export { startUploadCleanup } from "./upload-cleanup";
+
+export async function cleanupRoomUploads(uploadsDir: string, roomId: string): Promise<void> {
+    return _cleanupRoomUploads(uploadsDir, roomId, activeUploadsByRoom);
+}
+
+const UPLOAD_ID_PATTERN = /^[a-zA-Z0-9_-]+$/;
 const MAX_UPLOAD_SIZE_BYTES = 50 * 1024 * 1024 * 1024;
 const MAX_UPLOAD_CHUNK_SIZE_BYTES = 16 * 1024 * 1024;
 const MAX_UPLOAD_CHUNKS = 100000;
 const MAX_SUBTITLE_SIZE_BYTES = 2 * 1024 * 1024;
-const UPLOAD_ID_PATTERN = /^[a-zA-Z0-9_-]+$/;
 
-// Cache de handles de arquivo abertos: uploadId -> { handle, lastUsed }
-const fileHandleCache = new Map<string, { handle: fs.FileHandle, lastUsed: number }>();
-const fileHandleOpenPromises = new Map<string, Promise<fs.FileHandle>>();
-const HANDLE_TTL_MS = 60000; // Fecha handle após 60s sem atividade.
-const activeWriteCounts = new Map<string, number>();
-
-// Cache de metadados em memória para reduzir I/O durante o upload.
-const metaCache = new Map<string, UploadMeta>();
-const receivedChunkSets = new Map<string, Set<number>>();
-const metaLoadPromises = new Map<string, Promise<UploadMeta | null>>();
-const uploadDirsById = new Map<string, string>();
-
-// Progresso deve ser calculado pelo servidor a partir dos chunks recebidos.
-// Limita a frequência de broadcast para não inundar o WS em uploads rápidos.
-const progressBroadcastByRoom = new Map<string, { progress: number; lastSent: number }>();
-const PROGRESS_BROADCAST_THROTTLE_MS = 250;
-
-function computeUploadProgress(meta: UploadMeta, receivedSet: Set<number> | undefined): number {
-  if (!meta.totalChunks) return 0;
-  const received = receivedSet?.size || 0;
-  // Evita mostrar 100% antes do /complete finalizar.
-  return Math.min(99, Math.round((received / meta.totalChunks) * 100));
-}
-
-function maybeBroadcastUploadProgress(roomId: string, deps: UploadDeps, progress: number, force = false) {
-  const now = Date.now();
-  const prev = progressBroadcastByRoom.get(roomId);
-
-  const previousProgress = prev?.progress;
-
-  // Sempre guarda o último progresso observado.
-  if (!prev) {
-    progressBroadcastByRoom.set(roomId, { progress, lastSent: 0 });
-  } else {
-    prev.progress = progress;
-  }
-
-  const state = progressBroadcastByRoom.get(roomId)!;
-
-  if (!force) {
-    if (now - state.lastSent < PROGRESS_BROADCAST_THROTTLE_MS) return;
-    if (previousProgress === progress && state.lastSent > 0) return;
-  }
-
-  state.lastSent = now;
-  deps.roomManager.broadcastAll(roomId, { type: "upload-progress", progress });
-}
-
-async function getUploadHandle(uploadId: string, partPath: string): Promise<fs.FileHandle> {
-  const cached = fileHandleCache.get(uploadId);
-  if (cached) {
-    cached.lastUsed = Date.now();
-    return cached.handle;
-  }
-
-  const pendingOpen = fileHandleOpenPromises.get(uploadId);
-  if (pendingOpen) {
-    return pendingOpen;
-  }
-
-  const openPromise = fs.open(partPath, "r+")
-    .then((handle) => {
-      fileHandleCache.set(uploadId, { handle, lastUsed: Date.now() });
-      return handle;
-    })
-    .finally(() => {
-      fileHandleOpenPromises.delete(uploadId);
-    });
-
-  fileHandleOpenPromises.set(uploadId, openPromise);
-  return openPromise;
-}
-
-async function closeUploadHandle(uploadId: string) {
-  if ((activeWriteCounts.get(uploadId) || 0) > 0) return;
-
-  const pendingOpen = fileHandleOpenPromises.get(uploadId);
-  if (pendingOpen) {
-    try {
-      const handle = await pendingOpen;
-      await handle.close();
-    } catch (e) {
-      logger.error("UploadRoute", `Falha ao fechar handle pendente do upload ${uploadId}`, e);
-    }
-    fileHandleCache.delete(uploadId);
-    fileHandleOpenPromises.delete(uploadId);
-    return;
-  }
-
-  const cached = fileHandleCache.get(uploadId);
-  if (cached) {
-    try {
-      await cached.handle.close();
-    } catch (e) {
-      logger.error("UploadRoute", `Falha ao fechar handle do upload ${uploadId}`, e);
-    }
-    fileHandleCache.delete(uploadId);
-  }
-}
-
-async function getOrLoadMeta(chunksDir: string, uploadId: string): Promise<UploadMeta | null> {
-  const pending = metaLoadPromises.get(uploadId);
-  if (pending) return pending;
-
-  const cached = metaCache.get(uploadId);
-  if (cached) return cached;
-
-  const loadPromise = (async () => {
-    const meta = await readMetaAsync(chunksDir);
-    if (meta) {
-      metaCache.set(uploadId, meta);
-      receivedChunkSets.set(uploadId, new Set(meta.receivedChunks || []));
-      uploadDirsById.set(uploadId, chunksDir);
-    }
-    return meta;
-  })();
-  metaLoadPromises.set(uploadId, loadPromise);
-  try {
-    return await loadPromise;
-  } finally {
-    metaLoadPromises.delete(uploadId);
-  }
-}
-
-// Sincroniza metadados em disco somente em init, complete e abort.
-async function syncMetaToDisk(uploadId: string): Promise<void> {
-  const meta = metaCache.get(uploadId);
-  const chunksDir = uploadDirsById.get(uploadId);
-  if (!meta || !chunksDir) return;
-
-  const receivedSet = receivedChunkSets.get(uploadId);
-  if (receivedSet) {
-    meta.receivedChunks = Array.from(receivedSet);
-  }
-  await writeMetaAsync(chunksDir, meta);
-}
-
-function clearMetaCache(uploadId: string) {
-  metaCache.delete(uploadId);
-  receivedChunkSets.delete(uploadId);
-  metaLoadPromises.delete(uploadId);
-  uploadDirsById.delete(uploadId);
-}
-
-// Fecha handles ociosos periodicamente para evitar acúmulo de descritores.
-setInterval(async () => {
-  const now = Date.now();
-  for (const [uploadId, cached] of fileHandleCache.entries()) {
-    const activeWrites = activeWriteCounts.get(uploadId) || 0;
-    if (activeWrites === 0 && now - cached.lastUsed > HANDLE_TTL_MS) {
-      await closeUploadHandle(uploadId);
-    }
-  }
-}, 15000);
-
-
-function getMetaPath(chunksDir: string) {
-  return join(chunksDir, "meta.json");
-}
-
-async function readMetaAsync(chunksDir: string): Promise<UploadMeta | null> {
-  const metaPath = getMetaPath(chunksDir);
-  try {
-    const raw = await fs.readFile(metaPath, "utf8");
-    return JSON.parse(raw) as UploadMeta;
-  } catch {
-    return null;
-  }
-}
-
-async function writeMetaAsync(chunksDir: string, meta: UploadMeta) {
-  const metaPath = getMetaPath(chunksDir);
-  await fs.writeFile(metaPath, JSON.stringify(meta));
-}
-
-function readMeta(chunksDir: string): UploadMeta | null {
-  const metaPath = getMetaPath(chunksDir);
-  if (!existsSync(metaPath)) return null;
-  try {
-    const raw = readFileSync(metaPath, "utf8");
-    return JSON.parse(raw) as UploadMeta;
-  } catch {
-    return null;
-  }
-}
-
-async function markActivity(chunksDir: string, uploadId: string) {
-  const meta = metaCache.get(uploadId);
-  if (!meta) return;
-  meta.lastActivity = Date.now();
-}
-
-function isPathInsideUploadsDir(uploadsDir: string, targetPath: string): boolean {
-  const uploadsRoot = resolve(uploadsDir);
-  const resolvedTargetPath = resolve(targetPath);
-  return resolvedTargetPath === uploadsRoot || resolvedTargetPath.startsWith(`${uploadsRoot}/`);
-}
+const activeUploadsByRoom = new Map<string, string>();
 
 function resolveUploadDir(uploadsDir: string, uploadId: string): string | null {
-  if (!UPLOAD_ID_PATTERN.test(uploadId)) {
-    return null;
-  }
-
-  const chunksDir = resolve(uploadsDir, uploadId);
-  return isPathInsideUploadsDir(uploadsDir, chunksDir) ? chunksDir : null;
+    if (!UPLOAD_ID_PATTERN.test(uploadId)) {
+        return null;
+    }
+    const chunksDir = resolve(uploadsDir, uploadId);
+    return isPathInsideUploadsDir(uploadsDir, chunksDir) ? chunksDir : null;
 }
 
 function parseUploadInteger(value: unknown): number | null {
-  const parsed = Number(value);
-  return Number.isSafeInteger(parsed) ? parsed : null;
-}
-
-async function removeUpload(uploadsDir: string, chunksDir: string) {
-  if (!isPathInsideUploadsDir(uploadsDir, chunksDir)) {
-    logger.warn("UploadRoute", `Ignorando remoção fora da pasta de uploads: ${chunksDir}`);
-    return;
-  }
-
-  if (existsSync(chunksDir)) {
-    try {
-      await rm(chunksDir, { recursive: true, force: true });
-    } catch (e) {
-      logger.error("UploadRoute", `Falha ao remover pasta de upload ${chunksDir}`, e);
-    }
-  }
-}
-
-async function cleanupUploads(uploadsDir: string) {
-  if (!existsSync(uploadsDir)) return;
-  const entries = readdirSync(uploadsDir, { withFileTypes: true });
-  const now = Date.now();
-
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
-    if (entry.name.endsWith('_subtitles')) continue;
-
-    const uploadId = entry.name;
-    const dirPath = join(uploadsDir, uploadId);
-
-    let meta: UploadMeta | null = metaCache.get(uploadId) ?? null;
-
-    if (!meta) {
-      meta = readMeta(dirPath);
-      if (meta) {
-        metaCache.set(uploadId, meta);
-        receivedChunkSets.set(uploadId, new Set(meta.receivedChunks || []));
-        uploadDirsById.set(uploadId, dirPath);
-      }
-    }
-
-    const age = meta?.lastActivity
-      ? now - meta.lastActivity
-      : now - statSync(dirPath).mtimeMs;
-
-    if (age > UPLOAD_TTL_MS) {
-      await closeUploadHandle(uploadId);
-      clearMetaCache(uploadId);
-      await removeUpload(uploadsDir, dirPath);
-    }
-  }
-}
-
-/**
- * Inicia limpeza periódica de uploads temporários expirados.
- * @param uploadsDir Diretório base de uploads.
- * @returns Nada.
- */
-export function startUploadCleanup(uploadsDir: string) {
-  setInterval(() => cleanupUploads(uploadsDir), CLEANUP_INTERVAL);
-}
-
-/**
- * Remove arquivos temporários de upload e legendas de uma sala.
- * @param uploadsDir Diretório base de uploads.
- * @param roomId Identificador da sala.
- * @returns Promise finalizada após a limpeza.
- * @throws Pode lançar erro de infraestrutura de sistema de arquivos.
- */
-export async function cleanupRoomUploads(uploadsDir: string, roomId: string) {
-  const activeUploadId = activeUploadsByRoom.get(roomId);
-  if (activeUploadId) {
-    const activeDir = join(uploadsDir, activeUploadId);
-    await closeUploadHandle(activeUploadId);
-    clearMetaCache(activeUploadId);
-    await removeUpload(uploadsDir, activeDir);
-    activeUploadsByRoom.delete(roomId);
-  }
-
-  const dirs = listRoomUploadDirs(uploadsDir, roomId);
-  for (const dir of dirs) {
-    const dirName = basename(dir);
-    if (dirName) {
-      await closeUploadHandle(dirName);
-      clearMetaCache(dirName);
-    }
-    await removeUpload(uploadsDir, dir);
-  }
-
-  const subtitlesDir = getSubtitlesDir(uploadsDir, roomId);
-  if (existsSync(subtitlesDir)) {
-    try {
-      await rm(subtitlesDir, { recursive: true, force: true });
-    } catch (e) {
-      logger.error("UploadRoute", `Falha ao remover pasta de legendas ${subtitlesDir}`, e);
-    }
-  }
+    const parsed = Number(value);
+    return Number.isSafeInteger(parsed) ? parsed : null;
 }
 
 /**
  * Cria rotas HTTP para upload em chunks, retomada e legendas.
  * @param deps Dependências para autorização e gestão de estado da sala.
  * @returns Instância de router com endpoints de upload.
- * @throws Retorna erros HTTP de validação, autorização e infraestrutura.
  */
 export function createUploadRouter(deps: UploadDeps): Router {
-  const router = Router();
-  const initialProcessingMessage = "Iniciando pós-processamento...";
-  const audioConversionErrorMessage = "Falha na conversão da faixa de áudio. Escolha outra faixa ou cancele o arquivo.";
+    const router = Router();
 
-  const removeRoomSubtitles = async (roomId: string) => {
-    const subtitlesDir = getSubtitlesDir(deps.uploadsDir, roomId);
-    if (existsSync(subtitlesDir)) {
-      try {
-        await rm(subtitlesDir, { recursive: true, force: true });
-      } catch (error) {
-        logger.error("UploadRoute", `Falha ao remover legendas da sala ${roomId}`, error);
-      }
-    }
+    const removeRoomSubtitles = async (roomId: string) => {
+        const subtitlesDir = getSubtitlesDir(deps.uploadsDir, roomId);
+        if (existsSync(subtitlesDir)) {
+            try {
+                await rm(subtitlesDir, { recursive: true, force: true });
+            } catch (error) {
+                logger.error("UploadRoute", `Falha ao remover legendas da sala ${roomId}`, error);
+            }
+        }
 
-    const room = deps.roomManager.getRoom(roomId);
-    if (room && room.state.subtitles.length > 0) {
-      deps.roomManager.updateState(roomId, { subtitles: [] });
-    }
-  };
-
-  const processRoomMedia = async (
-    roomId: string,
-    filePath: string,
-    selectedAudioStreamIndex?: number,
-    availableAudioTracks: AudioTrackInfo[] = []
-  ) => {
-    try {
-      const processor = new MediaProcessor(deps.roomManager);
-      const processedPath = await processor.processMedia(roomId, filePath, { selectedAudioStreamIndex });
-
-      deps.roomManager.setVideoPath(roomId, processedPath);
-      deps.roomManager.updateState(roomId, {
-        isProcessing: false,
-        processingMessage: '',
-        pendingVideoPath: '',
-        isAwaitingAudioSelection: false,
-        audioTracks: [],
-        selectedAudioStreamIndex: null,
-        audioSelectionErrorMessage: '',
-      });
-      deps.roomManager.broadcastAll(roomId, { type: "video-ready" });
-    } catch (err) {
-      logger.error("UploadRoute", `Falha ao processar mídia da sala ${roomId}`, err);
-
-      if (err instanceof AudioTrackConversionError) {
         const room = deps.roomManager.getRoom(roomId);
-        const audioTracks = room?.state.audioTracks.length
-          ? room.state.audioTracks
-          : availableAudioTracks;
+        if (room && room.state.subtitles.length > 0) {
+            deps.roomManager.updateState(roomId, { subtitles: [] });
+        }
+    };
+
+    router.get("/status/:roomId/:uploadId", async (req, res) => {
+        const { roomId, uploadId } = req.params;
+
+        const room = deps.roomManager.getRoom(roomId);
+        if (!room) {
+            res.status(404).json({ error: "Sala não encontrada" });
+            return;
+        }
+
+        const auth = getAuthFromRequest(req);
+        const authError = ensureUploadAuthorized(roomId, auth.token, deps);
+        if (authError) { res.status(authError.status).json({ error: authError.error }); return; }
+
+        const chunksDir = resolveUploadDir(deps.uploadsDir, uploadId);
+        if (!chunksDir) {
+            res.status(400).json({ error: "Upload inválido" });
+            return;
+        }
+
+        if (!existsSync(chunksDir)) {
+            res.status(404).json({ error: "Upload não encontrado" });
+            return;
+        }
+
+        const meta = await getOrLoadMeta(chunksDir, uploadId);
+        if (!meta || meta.roomId !== roomId) {
+            res.status(400).json({ error: "Upload inválido" });
+            return;
+        }
+
+        const receivedSet = getReceivedChunkSet(uploadId) || new Set(meta.receivedChunks || []);
+        const existingChunks = Array.from(receivedSet).sort((a, b) => a - b);
+        const progress = meta.totalChunks > 0
+            ? Math.round((existingChunks.length / meta.totalChunks) * 100)
+            : 0;
+
+        deps.roomManager.updateState(roomId, { isUploading: true, uploadProgress: progress });
+        deps.roomManager.broadcastAll(roomId, { type: "upload-progress", progress });
+
+        res.json({
+            uploadId,
+            filename: meta.filename,
+            totalChunks: meta.totalChunks,
+            existingChunks,
+            lastActivity: meta.lastActivity
+        });
+    });
+
+    router.post("/abort/:roomId/:uploadId", async (req, res) => {
+        const { roomId, uploadId } = req.params;
+
+        const room = deps.roomManager.getRoom(roomId);
+        if (!room) {
+            res.status(404).json({ error: "Sala não encontrada" });
+            return;
+        }
+
+        const auth = getAuthFromRequest(req);
+        const authError = ensureUploadAuthorized(roomId, auth.token, deps);
+        if (authError) { res.status(authError.status).json({ error: authError.error }); return; }
+
+        const chunksDir = resolveUploadDir(deps.uploadsDir, uploadId);
+        if (!chunksDir) {
+            res.status(400).json({ error: "Upload inválido" });
+            return;
+        }
+
+        await closeUploadHandle(uploadId);
+        clearMetaCache(uploadId);
+        await removeUpload(deps.uploadsDir, chunksDir);
+
+        if (activeUploadsByRoom.get(roomId) === uploadId) {
+            activeUploadsByRoom.delete(roomId);
+        }
+
+        deps.roomManager.updateState(roomId, { isUploading: false, uploadProgress: 0 });
+        deps.roomManager.broadcastAll(roomId, { type: "upload-progress", progress: 0 });
+
+        res.json({ success: true });
+    });
+
+    router.post("/init/:roomId", async (req, res) => {
+        const { roomId } = req.params;
+        const room = deps.roomManager.getRoom(roomId);
+        if (!room) {
+            res.status(404).json({ error: "Sala não encontrada" });
+            return;
+        }
+
+        const body = req.body;
+        const auth = getAuthFromRequest(req, body);
+        const authError = ensureUploadAuthorized(roomId, auth.token, deps);
+        if (authError) { res.status(authError.status).json({ error: authError.error }); return; }
+
+        if (room.state.isProcessing || room.state.isAwaitingAudioSelection) {
+            res.status(409).json({ error: "Aguarde a seleção e o processamento do áudio antes de enviar outro vídeo" });
+            return;
+        }
+
+        const filename = typeof body.filename === "string" ? body.filename : "";
+        const totalChunks = parseUploadInteger(body.totalChunks) ?? 0;
+        const chunkSize = parseUploadInteger(body.chunkSize) ?? 0;
+        const totalSize = parseUploadInteger(body.totalSize) ?? 0;
+
+        if (!filename.trim()) {
+            res.status(400).json({ error: "Nome do arquivo inválido" });
+            return;
+        }
+
+        if (
+            totalChunks <= 0 ||
+            totalChunks > MAX_UPLOAD_CHUNKS ||
+            chunkSize <= 0 ||
+            chunkSize > MAX_UPLOAD_CHUNK_SIZE_BYTES ||
+            totalSize <= 0 ||
+            totalSize > MAX_UPLOAD_SIZE_BYTES
+        ) {
+            res.status(400).json({ error: "Dados de upload inválidos" });
+            return;
+        }
+
+        const minimumExpectedSize = (totalChunks - 1) * chunkSize;
+        const maximumExpectedSize = totalChunks * chunkSize;
+        if (totalSize <= minimumExpectedSize || totalSize > maximumExpectedSize) {
+            res.status(400).json({ error: "Tamanho total do upload inválido" });
+            return;
+        }
+
+        const currentUpload = activeUploadsByRoom.get(roomId);
+        if (currentUpload) {
+            const currentDir = join(deps.uploadsDir, currentUpload);
+            await closeUploadHandle(currentUpload);
+            await removeUpload(deps.uploadsDir, currentDir);
+            clearMetaCache(currentUpload);
+            activeUploadsByRoom.delete(roomId);
+        }
+
+        const uploadId = `${roomId}_${Date.now()}`;
+        const safeFilename = sanitizeUploadFilename(filename);
+        const chunksDir = resolveUploadDir(deps.uploadsDir, uploadId);
+        if (!chunksDir) {
+            res.status(500).json({ error: "Falha ao preparar upload" });
+            return;
+        }
+
+        mkdirSync(chunksDir, { recursive: true });
+
+        const meta: UploadMeta = {
+            roomId,
+            uploadId,
+            filename: safeFilename,
+            totalChunks,
+            chunkSize,
+            totalSize,
+            receivedChunks: [],
+            createdAt: Date.now(),
+            lastActivity: Date.now()
+        };
+
+        initMetaCache(uploadId, meta, chunksDir);
+        await persistMeta(chunksDir, meta);
+        activeUploadsByRoom.set(roomId, uploadId);
+
+        const partPath = getPartPath(chunksDir);
+        const fileHandle = await fs.open(partPath, "w+");
+        try {
+            if (totalSize > 0) {
+                await fileHandle.truncate(totalSize);
+            }
+        } finally {
+            await fileHandle.close();
+        }
 
         deps.roomManager.updateState(roomId, {
-          isProcessing: false,
-          processingMessage: '',
-          pendingVideoPath: filePath,
-          isAwaitingAudioSelection: true,
-          audioTracks,
-          selectedAudioStreamIndex: null,
-          audioSelectionErrorMessage: audioConversionErrorMessage,
+            isUploading: true,
+            uploadProgress: 0,
+            isAwaitingAudioSelection: false,
+            audioTracks: [],
+            selectedAudioStreamIndex: null,
+            audioSelectionErrorMessage: "",
+            pendingVideoPath: "",
+            processingMessage: "",
         });
+        deps.roomManager.broadcastAll(roomId, { type: "upload-start", filename });
+
+        res.json({ uploadId, safeFilename });
+    });
+
+    router.post("/chunk/:roomId/:uploadId/:chunkIndex", async (req, res) => {
+        const { roomId, uploadId } = req.params;
+        const chunkIndex = parseInt(req.params.chunkIndex, 10);
+
+        const room = deps.roomManager.getRoom(roomId);
+        if (!room) {
+            res.status(404).json({ error: "Sala não encontrada" });
+            return;
+        }
+
+        const auth = getAuthFromRequest(req);
+        const authError = ensureUploadAuthorized(roomId, auth.token, deps);
+        if (authError) { res.status(authError.status).json({ error: authError.error }); return; }
+
+        const chunksDir = resolveUploadDir(deps.uploadsDir, uploadId);
+        if (!chunksDir) {
+            res.status(400).json({ error: "Upload inválido" });
+            return;
+        }
+
+        if (!existsSync(chunksDir)) {
+            res.status(404).json({ error: "Upload não encontrado" });
+            return;
+        }
+
+        const meta = getMetaFromCache(uploadId) || await getOrLoadMeta(chunksDir, uploadId);
+        if (!meta || meta.roomId !== roomId) {
+            res.status(400).json({ error: "Upload inválido" });
+            return;
+        }
+
+        if (chunkIndex < 0 || chunkIndex >= meta.totalChunks) {
+            res.status(400).json({ error: "Chunk inválido" });
+            return;
+        }
+
+        const partPath = getPartPath(chunksDir);
+        const chunkSize = meta.chunkSize;
+        const position = chunkIndex * chunkSize;
+        const expectedChunkSize = Math.min(chunkSize, meta.totalSize - position);
+
+        if (expectedChunkSize <= 0) {
+            res.status(400).json({ error: "Chunk inválido" });
+            return;
+        }
+
+        const fileHandle = await getUploadHandle(uploadId, partPath);
+        activeWriteCounts.set(uploadId, (activeWriteCounts.get(uploadId) || 0) + 1);
+        let bytesWritten = 0;
+        let isChunkTooLarge = false;
+
+        try {
+            for await (const chunk of req) {
+                if (bytesWritten + chunk.length > expectedChunkSize) {
+                    isChunkTooLarge = true;
+                    break;
+                }
+                await fileHandle.write(chunk, 0, chunk.length, position + bytesWritten);
+                bytesWritten += chunk.length;
+            }
+        } catch (e) {
+            logger.error("UploadRoute", `Falha ao escrever chunk ${chunkIndex} do upload ${uploadId}`, e);
+            const remaining = (activeWriteCounts.get(uploadId) || 1) - 1;
+            if (remaining <= 0) {
+                activeWriteCounts.delete(uploadId);
+            } else {
+                activeWriteCounts.set(uploadId, remaining);
+            }
+            res.status(500).json({ error: "Erro ao escrever dados" });
+            return;
+        }
+
+        const remaining = (activeWriteCounts.get(uploadId) || 1) - 1;
+        if (remaining <= 0) {
+            activeWriteCounts.delete(uploadId);
+        } else {
+            activeWriteCounts.set(uploadId, remaining);
+        }
+
+        if (isChunkTooLarge) {
+            res.status(413).json({ error: "Chunk excede o tamanho permitido" });
+            return;
+        }
+
+        if (bytesWritten !== expectedChunkSize) {
+            res.status(400).json({ error: "Chunk incompleto" });
+            return;
+        }
+
+        meta.lastActivity = Date.now();
+        markChunkReceived(uploadId, chunkIndex);
+        meta.receivedChunks = Array.from(getReceivedChunkSet(uploadId) || new Set());
+        activeUploadsByRoom.set(roomId, uploadId);
+        await persistMeta(chunksDir, meta);
+
+        const progress = computeUploadProgress(meta, getReceivedChunkSet(uploadId));
+        deps.roomManager.updateState(roomId, { isUploading: true, uploadProgress: progress });
+        maybeBroadcastUploadProgress(roomId, deps, progress);
+
+        res.json({ success: true, chunkIndex, progress });
+    });
+
+    router.post("/complete/:roomId/:uploadId", async (req, res) => {
+        const { roomId, uploadId } = req.params;
+
+        const room = deps.roomManager.getRoom(roomId);
+        if (!room) {
+            res.status(404).json({ error: "Sala não encontrada" });
+            return;
+        }
+
+        const body = req.body;
+        const auth = getAuthFromRequest(req, body);
+        const authError = ensureUploadAuthorized(roomId, auth.token, deps);
+        if (authError) { res.status(authError.status).json({ error: authError.error }); return; }
+
+        const chunksDir = resolveUploadDir(deps.uploadsDir, uploadId);
+        if (!chunksDir) {
+            res.status(400).json({ error: "Upload inválido" });
+            return;
+        }
+
+        const meta = getMetaFromCache(uploadId) || await getOrLoadMeta(chunksDir, uploadId);
+        if (!meta || meta.roomId !== roomId) {
+            res.status(400).json({ error: "Upload inválido" });
+            return;
+        }
+
+        const receivedSet = getReceivedChunkSet(uploadId);
+        if (!receivedSet || receivedSet.size !== meta.totalChunks) {
+            res.status(400).json({ error: "Upload incompleto", received: receivedSet?.size || 0, expected: meta.totalChunks });
+            return;
+        }
+
+        const safeFilename = meta.filename;
+        const finalPath = join(deps.uploadsDir, `${uploadId}_${safeFilename}`);
+        const partPath = getPartPath(chunksDir);
+
+        await closeUploadHandle(uploadId);
+        await syncMetaToDisk(uploadId);
+        clearMetaCache(uploadId);
+
+        await fs.rename(partPath, finalPath);
+        await removeUpload(deps.uploadsDir, chunksDir);
+
+        if (activeUploadsByRoom.get(roomId) === uploadId) {
+            activeUploadsByRoom.delete(roomId);
+        }
+
+        const { MediaProcessor } = await import("../services/media-processor");
+        const processor = new MediaProcessor(deps.roomManager);
+        const audioTracks = await processor.listAudioTracks(finalPath);
+
+        if (audioTracks.length > 1) {
+            deps.roomManager.updateState(roomId, {
+                isUploading: false,
+                uploadProgress: 100,
+                isAwaitingAudioSelection: true,
+                audioTracks,
+                selectedAudioStreamIndex: null,
+                audioSelectionErrorMessage: "",
+                pendingVideoPath: finalPath,
+                isProcessing: false,
+                processingMessage: "",
+            });
+
+            deps.roomManager.broadcastAll(roomId, {
+                type: "audio-track-selection-required",
+                audioTracks,
+                errorMessage: "",
+            });
+
+            res.json({
+                success: true,
+                filename: safeFilename,
+                requiresAudioSelection: true,
+                audioTracks,
+            });
+            return;
+        }
+
+        const selectedAudioStreamIndex = audioTracks.length === 1 ? audioTracks[0].streamIndex : undefined;
+        const processingState = await startRoomProcessing(roomId, finalPath, deps, selectedAudioStreamIndex, audioTracks);
+
+        if (processingState.requiresAudioSelection) {
+            res.json({
+                success: true,
+                filename: safeFilename,
+                requiresAudioSelection: true,
+                audioTracks: processingState.audioTracks,
+                errorMessage: processingState.errorMessage,
+            });
+            return;
+        }
+
+        res.json({
+            success: true,
+            filename: safeFilename,
+            processing: processingState.processing,
+            ready: processingState.ready,
+        });
+    });
+
+    router.post("/audio-track/:roomId", async (req, res) => {
+        const { roomId } = req.params;
+        const room = deps.roomManager.getRoom(roomId);
+        if (!room) {
+            res.status(404).json({ error: "Sala não encontrada" });
+            return;
+        }
+
+        const auth = getAuthFromRequest(req, req.body);
+        const authError = ensureUploadAuthorized(roomId, auth.token, deps);
+        if (authError) { res.status(authError.status).json({ error: authError.error }); return; }
+
+        if (room.state.isProcessing) {
+            res.status(409).json({ error: "A sala já está em processamento" });
+            return;
+        }
+
+        if (!room.state.isAwaitingAudioSelection) {
+            res.status(409).json({ error: "Não há seleção de faixa de áudio pendente" });
+            return;
+        }
+
+        const streamIndex = Number(req.body?.streamIndex);
+        if (!Number.isInteger(streamIndex)) {
+            res.status(400).json({ error: "Faixa de áudio inválida" });
+            return;
+        }
+
+        const selectedTrack = room.state.audioTracks.find((track) => track.streamIndex === streamIndex);
+        if (!selectedTrack) {
+            res.status(400).json({ error: "Faixa de áudio não encontrada" });
+            return;
+        }
+
+        if (!room.state.pendingVideoPath) {
+            res.status(400).json({ error: "Arquivo pendente não encontrado" });
+            return;
+        }
+
+        const processingState = await startRoomProcessing(roomId, room.state.pendingVideoPath, deps, streamIndex, room.state.audioTracks);
+
+        if (processingState.requiresAudioSelection) {
+            res.json({
+                success: true,
+                requiresAudioSelection: true,
+                audioTracks: processingState.audioTracks,
+                errorMessage: processingState.errorMessage,
+            });
+            return;
+        }
+
+        res.json({
+            success: true,
+            processing: processingState.processing,
+            ready: processingState.ready,
+        });
+    });
+
+    router.post("/cancel-pending/:roomId", async (req, res) => {
+        const { roomId } = req.params;
+        const room = deps.roomManager.getRoom(roomId);
+        if (!room) {
+            res.status(404).json({ error: "Sala não encontrada" });
+            return;
+        }
+
+        const auth = getAuthFromRequest(req, req.body);
+        const authError = ensureUploadAuthorized(roomId, auth.token, deps);
+        if (authError) {
+            res.status(authError.status).json({ error: authError.error });
+            return;
+        }
+
+        if (room.state.isProcessing) {
+            res.status(409).json({ error: "Não é possível cancelar enquanto o arquivo está em processamento" });
+            return;
+        }
+
+        if (!room.state.pendingVideoPath) {
+            res.status(400).json({ error: "Nenhum arquivo pendente para cancelar" });
+            return;
+        }
+
+        const pendingPath = room.state.pendingVideoPath;
+        const uploadsRoot = resolve(deps.uploadsDir);
+        const resolvedPendingPath = resolve(pendingPath);
+
+        if (!resolvedPendingPath.startsWith(uploadsRoot)) {
+            res.status(403).json({ error: "Arquivo pendente inválido" });
+            return;
+        }
+
+        if (existsSync(pendingPath)) {
+            try {
+                await rm(pendingPath, { force: true });
+            } catch (error) {
+                logger.error("UploadRoute", `Falha ao remover arquivo pendente ${pendingPath}`, error);
+            }
+        }
+
+        await removeRoomSubtitles(roomId);
+
+        deps.roomManager.updateState(roomId, {
+            isUploading: false,
+            uploadProgress: 0,
+            pendingVideoPath: "",
+            isAwaitingAudioSelection: false,
+            audioTracks: [],
+            selectedAudioStreamIndex: null,
+            audioSelectionErrorMessage: "",
+            isProcessing: false,
+            processingMessage: "",
+        });
+
+        deps.roomManager.broadcastAll(roomId, { type: "pending-upload-cancelled" });
+
+        res.json({ success: true });
+    });
+
+    router.post("/progress/:roomId", async (req, res) => {
+        const { roomId } = req.params;
+
+        const room = deps.roomManager.getRoom(roomId);
+        if (!room) {
+            res.status(404).json({ error: "Sala não encontrada" });
+            return;
+        }
+
+        const body = req.body;
+        const auth = getAuthFromRequest(req, body);
+        const authError = ensureUploadAuthorized(roomId, auth.token, deps);
+        if (authError) { res.status(authError.status).json({ error: authError.error }); return; }
+
+        const bodyUploadId = typeof body.uploadId === "string" ? body.uploadId : "";
+        const effectiveUploadId = bodyUploadId || activeUploadsByRoom.get(roomId);
+
+        if (effectiveUploadId) {
+            const chunksDir = resolveUploadDir(deps.uploadsDir, effectiveUploadId);
+            if (!chunksDir) {
+                res.status(400).json({ error: "Upload inválido" });
+                return;
+            }
+
+            if (existsSync(chunksDir)) {
+                activeUploadsByRoom.set(roomId, effectiveUploadId);
+                markActivity(effectiveUploadId).catch((error) => {
+                    logger.error("UploadRoute", `Falha ao marcar atividade do upload ${effectiveUploadId}`, error);
+                });
+
+                const meta = getMetaFromCache(effectiveUploadId) || await getOrLoadMeta(chunksDir, effectiveUploadId);
+                if (meta && meta.roomId === roomId) {
+                    const receivedSet = getReceivedChunkSet(effectiveUploadId) || new Set(meta.receivedChunks || []);
+
+                    const progress = computeUploadProgress(meta, receivedSet);
+                    deps.roomManager.updateState(roomId, { isUploading: true, uploadProgress: progress });
+                    maybeBroadcastUploadProgress(roomId, deps, progress);
+                    res.json({ success: true, progress });
+                    return;
+                }
+            }
+        }
+
+        res.json({ success: true });
+    });
+
+    router.post("/subtitle/:roomId", async (req: Request, res: Response) => {
+        const roomId = req.params.roomId as string;
+        const room = deps.roomManager.getRoom(roomId);
+        if (!room) {
+            res.status(404).json({ error: "Sala não encontrada" });
+            return;
+        }
+
+        const auth = getAuthFromRequest(req);
+        const authError = ensureUploadAuthorized(roomId, auth.token, deps);
+        if (authError) { res.status(authError.status).json({ error: authError.error }); return; }
+
+        const subtitlesDir = getSubtitlesDir(deps.uploadsDir, roomId);
+        if (!existsSync(subtitlesDir)) {
+            mkdirSync(subtitlesDir, { recursive: true });
+        }
+
+        const chunks: Buffer[] = [];
+        let totalSubtitleBytes = 0;
+        for await (const chunk of req) {
+            totalSubtitleBytes += chunk.length;
+            if (totalSubtitleBytes > MAX_SUBTITLE_SIZE_BYTES) {
+                res.status(413).json({ error: "Legenda excede o tamanho máximo permitido" });
+                return;
+            }
+            chunks.push(chunk);
+        }
+        const buffer = Buffer.concat(chunks);
+
+        const rawFilename = (req.headers["x-filename"] as string) || "subtitle.srt";
+        const safeFilename = sanitizeUploadFilename(basename(rawFilename));
+        const displayName = rawFilename.replace(/\.srt$/i, "");
+        const filePath = join(subtitlesDir, safeFilename);
+
+        await fs.writeFile(filePath, buffer);
+        deps.roomManager.addSubtitle(roomId, safeFilename, displayName);
 
         deps.roomManager.broadcastAll(roomId, {
-          type: "audio-track-selection-required",
-          audioTracks,
-          errorMessage: audioConversionErrorMessage,
+            type: "subtitle-added",
+            filename: safeFilename,
         });
-        return;
-      }
 
-      if (existsSync(filePath)) {
+        res.json({ success: true, filename: safeFilename, displayName });
+    });
+
+    router.get("/subtitles/:roomId", (req, res) => {
         try {
-          await rm(filePath, { force: true });
-        } catch (removeError) {
-          logger.error("UploadRoute", `Falha ao remover arquivo após erro de processamento ${filePath}`, removeError);
+            const roomId = req.params.roomId as string;
+            requireRoomAccess(deps.roomManager, roomId, req);
+            const subtitles = deps.roomManager.getSubtitles(roomId);
+            res.json({ subtitles });
+        } catch (error) {
+            logger.error("UploadRoute", "Falha ao listar legendas", error);
+            res.status(403).json({ error: "Sem permissão para acessar legendas" });
         }
-      }
-
-      deps.roomManager.updateState(roomId, {
-        isProcessing: false,
-        processingMessage: 'Erro no processamento',
-        pendingVideoPath: '',
-        isAwaitingAudioSelection: false,
-        audioTracks: [],
-        selectedAudioStreamIndex: null,
-        audioSelectionErrorMessage: '',
-      });
-      deps.roomManager.broadcastAll(roomId, {
-        type: "processing-progress",
-        processingMessage: "Erro no processamento do vídeo",
-      });
-    }
-  };
-
-  const getRoomProcessingResponse = (
-    roomId: string,
-    fallbackAudioTracks: AudioTrackInfo[] = []
-  ) => {
-    const room = deps.roomManager.getRoom(roomId);
-    const audioTracks = room?.state.audioTracks.length
-      ? room.state.audioTracks
-      : fallbackAudioTracks;
-
-    return {
-      ready: Boolean(room?.state.videoPath),
-      processing: Boolean(room?.state.isProcessing),
-      requiresAudioSelection: Boolean(room?.state.isAwaitingAudioSelection),
-      audioTracks,
-      errorMessage: room?.state.audioSelectionErrorMessage || '',
-    };
-  };
-
-  const startRoomProcessing = async (
-    roomId: string,
-    filePath: string,
-    selectedAudioStreamIndex?: number,
-    availableAudioTracks: AudioTrackInfo[] = []
-  ) => {
-    deps.roomManager.updateState(roomId, {
-      isUploading: false,
-      uploadProgress: 100,
-      isAwaitingAudioSelection: false,
-      audioTracks: availableAudioTracks,
-      selectedAudioStreamIndex: selectedAudioStreamIndex ?? null,
-      pendingVideoPath: filePath,
-      isProcessing: true,
-      processingMessage: initialProcessingMessage,
-      audioSelectionErrorMessage: '',
     });
 
-    deps.roomManager.broadcastAll(roomId, {
-      type: "processing-progress",
-      processingMessage: initialProcessingMessage,
-    });
+    router.get("/subtitle/:roomId/:filename", async (req, res) => {
+        const roomId = req.params.roomId as string;
 
-    processRoomMedia(roomId, filePath, selectedAudioStreamIndex, availableAudioTracks).catch((error) => {
-      logger.error("UploadRoute", `Falha inesperada no fluxo de processamento da sala ${roomId}`, error);
-    });
-
-    await Promise.resolve();
-    return getRoomProcessingResponse(roomId, availableAudioTracks);
-  };
-
-  router.get("/status/:roomId/:uploadId", async (req, res) => {
-    const { roomId, uploadId } = req.params;
-
-    const room = deps.roomManager.getRoom(roomId);
-    if (!room) {
-      res.status(404).json({ error: "Sala não encontrada" });
-      return;
-    }
-
-    const auth = getAuthFromRequest(req);
-    const authError = ensureUploadAuthorized(roomId, auth.token, deps);
-    if (authError) { res.status(authError.status).json({ error: authError.error }); return; }
-
-    const chunksDir = resolveUploadDir(deps.uploadsDir, uploadId);
-    if (!chunksDir) {
-      res.status(400).json({ error: "Upload inválido" });
-      return;
-    }
-
-    if (!existsSync(chunksDir)) {
-      res.status(404).json({ error: "Upload não encontrado" });
-      return;
-    }
-
-    const meta = await getOrLoadMeta(chunksDir, uploadId);
-    if (!meta || meta.roomId !== roomId) {
-      res.status(400).json({ error: "Upload inválido" });
-      return;
-    }
-
-    const receivedSet = receivedChunkSets.get(uploadId) || new Set(meta.receivedChunks || []);
-    receivedChunkSets.set(uploadId, receivedSet);
-    const existingChunks = Array.from(receivedSet).sort((a, b) => a - b);
-    const progress = meta.totalChunks > 0
-      ? Math.round((existingChunks.length / meta.totalChunks) * 100)
-      : 0;
-
-    deps.roomManager.updateState(roomId, { isUploading: true, uploadProgress: progress });
-    deps.roomManager.broadcastAll(roomId, { type: "upload-progress", progress });
-
-    res.json({
-      uploadId,
-      filename: meta.filename,
-      totalChunks: meta.totalChunks,
-      existingChunks,
-      lastActivity: meta.lastActivity
-    });
-  });
-
-  router.post("/abort/:roomId/:uploadId", async (req, res) => {
-    const { roomId, uploadId } = req.params;
-
-    const room = deps.roomManager.getRoom(roomId);
-    if (!room) {
-      res.status(404).json({ error: "Sala não encontrada" });
-      return;
-    }
-
-    const auth = getAuthFromRequest(req);
-    const authError = ensureUploadAuthorized(roomId, auth.token, deps);
-    if (authError) { res.status(authError.status).json({ error: authError.error }); return; }
-
-    const chunksDir = resolveUploadDir(deps.uploadsDir, uploadId);
-    if (!chunksDir) {
-      res.status(400).json({ error: "Upload inválido" });
-      return;
-    }
-
-    await closeUploadHandle(uploadId);
-    clearMetaCache(uploadId);
-    await removeUpload(deps.uploadsDir, chunksDir);
-
-    if (activeUploadsByRoom.get(roomId) === uploadId) {
-      activeUploadsByRoom.delete(roomId);
-    }
-
-    deps.roomManager.updateState(roomId, { isUploading: false, uploadProgress: 0 });
-    deps.roomManager.broadcastAll(roomId, { type: "upload-progress", progress: 0 });
-
-    res.json({ success: true });
-  });
-
-  router.post("/init/:roomId", async (req, res) => {
-    const { roomId } = req.params;
-    const room = deps.roomManager.getRoom(roomId);
-    if (!room) {
-      res.status(404).json({ error: "Sala não encontrada" });
-      return;
-    }
-
-    const body = req.body;
-    const auth = getAuthFromRequest(req, body);
-    const authError = ensureUploadAuthorized(roomId, auth.token, deps);
-    if (authError) { res.status(authError.status).json({ error: authError.error }); return; }
-
-    if (room.state.isProcessing || room.state.isAwaitingAudioSelection) {
-      res.status(409).json({ error: "Aguarde a seleção e o processamento do áudio antes de enviar outro vídeo" });
-      return;
-    }
-
-    const filename = typeof body.filename === "string" ? body.filename : "";
-    const totalChunks = parseUploadInteger(body.totalChunks) ?? 0;
-    const chunkSize = parseUploadInteger(body.chunkSize) ?? 0;
-    const totalSize = parseUploadInteger(body.totalSize) ?? 0;
-
-    if (!filename.trim()) {
-      res.status(400).json({ error: "Nome do arquivo inválido" });
-      return;
-    }
-
-    if (
-      totalChunks <= 0 ||
-      totalChunks > MAX_UPLOAD_CHUNKS ||
-      chunkSize <= 0 ||
-      chunkSize > MAX_UPLOAD_CHUNK_SIZE_BYTES ||
-      totalSize <= 0 ||
-      totalSize > MAX_UPLOAD_SIZE_BYTES
-    ) {
-      res.status(400).json({ error: "Dados de upload inválidos" });
-      return;
-    }
-
-    const minimumExpectedSize = (totalChunks - 1) * chunkSize;
-    const maximumExpectedSize = totalChunks * chunkSize;
-    if (totalSize <= minimumExpectedSize || totalSize > maximumExpectedSize) {
-      res.status(400).json({ error: "Tamanho total do upload inválido" });
-      return;
-    }
-
-    const currentUpload = activeUploadsByRoom.get(roomId);
-    if (currentUpload) {
-      const currentDir = join(deps.uploadsDir, currentUpload);
-      await closeUploadHandle(currentUpload);
-      await removeUpload(deps.uploadsDir, currentDir);
-      clearMetaCache(currentUpload);
-      activeUploadsByRoom.delete(roomId);
-    }
-
-    const uploadId = `${roomId}_${Date.now()}`;
-    const safeFilename = sanitizeUploadFilename(filename);
-    const chunksDir = resolveUploadDir(deps.uploadsDir, uploadId);
-    if (!chunksDir) {
-      res.status(500).json({ error: "Falha ao preparar upload" });
-      return;
-    }
-
-    mkdirSync(chunksDir, { recursive: true });
-
-    const meta: UploadMeta = {
-      roomId,
-      uploadId,
-      filename: safeFilename,
-      totalChunks,
-      chunkSize,
-      totalSize,
-      receivedChunks: [],
-      createdAt: Date.now(),
-      lastActivity: Date.now()
-    };
-
-    metaCache.set(uploadId, meta);
-    receivedChunkSets.set(uploadId, new Set());
-    uploadDirsById.set(uploadId, chunksDir);
-    await writeMetaAsync(chunksDir, meta);
-    activeUploadsByRoom.set(roomId, uploadId);
-
-    const partPath = getPartPath(chunksDir);
-    const fileHandle = await fs.open(partPath, "w+");
-    try {
-      if (totalSize > 0) {
-        await fileHandle.truncate(totalSize);
-      }
-    } finally {
-      await fileHandle.close();
-    }
-
-    deps.roomManager.updateState(roomId, {
-      isUploading: true,
-      uploadProgress: 0,
-      isAwaitingAudioSelection: false,
-      audioTracks: [],
-      selectedAudioStreamIndex: null,
-      audioSelectionErrorMessage: '',
-      pendingVideoPath: '',
-      processingMessage: '',
-    });
-    deps.roomManager.broadcastAll(roomId, { type: "upload-start", filename });
-
-    res.json({ uploadId, safeFilename });
-  });
-
-  router.post("/chunk/:roomId/:uploadId/:chunkIndex", async (req, res) => {
-    const { roomId, uploadId } = req.params;
-    const chunkIndex = parseInt(req.params.chunkIndex, 10);
-
-    const room = deps.roomManager.getRoom(roomId);
-    if (!room) {
-      res.status(404).json({ error: "Sala não encontrada" });
-      return;
-    }
-
-    const auth = getAuthFromRequest(req);
-    const authError = ensureUploadAuthorized(roomId, auth.token, deps);
-    if (authError) { res.status(authError.status).json({ error: authError.error }); return; }
-
-    const chunksDir = resolveUploadDir(deps.uploadsDir, uploadId);
-    if (!chunksDir) {
-      res.status(400).json({ error: "Upload inválido" });
-      return;
-    }
-
-    if (!existsSync(chunksDir)) {
-      res.status(404).json({ error: "Upload não encontrado" });
-      return;
-    }
-
-    const meta = metaCache.get(uploadId) || await getOrLoadMeta(chunksDir, uploadId);
-    if (!meta || meta.roomId !== roomId) {
-      res.status(400).json({ error: "Upload inválido" });
-      return;
-    }
-
-    if (chunkIndex < 0 || chunkIndex >= meta.totalChunks) {
-      res.status(400).json({ error: "Chunk inválido" });
-      return;
-    }
-
-    const partPath = getPartPath(chunksDir);
-    const chunkSize = meta.chunkSize;
-    const position = chunkIndex * chunkSize;
-    const expectedChunkSize = Math.min(chunkSize, meta.totalSize - position);
-
-    if (expectedChunkSize <= 0) {
-      res.status(400).json({ error: "Chunk inválido" });
-      return;
-    }
-
-    const fileHandle = await getUploadHandle(uploadId, partPath);
-    activeWriteCounts.set(uploadId, (activeWriteCounts.get(uploadId) || 0) + 1);
-    let bytesWritten = 0;
-    let isChunkTooLarge = false;
-
-    try {
-      for await (const chunk of req) {
-        if (bytesWritten + chunk.length > expectedChunkSize) {
-          isChunkTooLarge = true;
-          break;
+        try {
+            requireRoomAccess(deps.roomManager, roomId, req);
+        } catch (error) {
+            logger.error("UploadRoute", "Falha ao carregar legenda", error);
+            res.status(403).json({ error: "Sem permissão para acessar legenda" });
+            return;
         }
 
-        await fileHandle.write(chunk, 0, chunk.length, position + bytesWritten);
-        bytesWritten += chunk.length;
-      }
-    } catch (e) {
-      logger.error("UploadRoute", `Falha ao escrever chunk ${chunkIndex} do upload ${uploadId}`, e);
-      const remaining = (activeWriteCounts.get(uploadId) || 1) - 1;
-      if (remaining <= 0) {
-        activeWriteCounts.delete(uploadId);
-      } else {
-        activeWriteCounts.set(uploadId, remaining);
-      }
-      res.status(500).json({ error: "Erro ao escrever dados" });
-      return;
-    }
+        const subtitlesDir = getSubtitlesDir(deps.uploadsDir, roomId);
+        const filename = basename(req.params.filename);
+        const filePath = join(subtitlesDir, filename);
 
-    const remaining = (activeWriteCounts.get(uploadId) || 1) - 1;
-    if (remaining <= 0) {
-      activeWriteCounts.delete(uploadId);
-    } else {
-      activeWriteCounts.set(uploadId, remaining);
-    }
-
-    if (isChunkTooLarge) {
-      res.status(413).json({ error: "Chunk excede o tamanho permitido" });
-      return;
-    }
-
-    if (bytesWritten !== expectedChunkSize) {
-      res.status(400).json({ error: "Chunk incompleto" });
-      return;
-    }
-
-    meta.lastActivity = Date.now();
-    const receivedSet = receivedChunkSets.get(uploadId) || new Set<number>();
-    receivedSet.add(chunkIndex);
-    receivedChunkSets.set(uploadId, receivedSet);
-    meta.receivedChunks = Array.from(receivedSet);
-    activeUploadsByRoom.set(roomId, uploadId);
-    await writeMetaAsync(chunksDir, meta);
-
-    const progress = computeUploadProgress(meta, receivedSet);
-    deps.roomManager.updateState(roomId, { isUploading: true, uploadProgress: progress });
-    maybeBroadcastUploadProgress(roomId, deps, progress);
-
-    res.json({ success: true, chunkIndex, progress });
-  });
-
-  router.post("/complete/:roomId/:uploadId", async (req, res) => {
-    const { roomId, uploadId } = req.params;
-
-    const room = deps.roomManager.getRoom(roomId);
-    if (!room) {
-      res.status(404).json({ error: "Sala não encontrada" });
-      return;
-    }
-
-    const body = req.body;
-    const auth = getAuthFromRequest(req, body);
-    const authError = ensureUploadAuthorized(roomId, auth.token, deps);
-    if (authError) { res.status(authError.status).json({ error: authError.error }); return; }
-
-    const chunksDir = resolveUploadDir(deps.uploadsDir, uploadId);
-    if (!chunksDir) {
-      res.status(400).json({ error: "Upload inválido" });
-      return;
-    }
-
-    const meta = metaCache.get(uploadId) || await getOrLoadMeta(chunksDir, uploadId);
-    if (!meta || meta.roomId !== roomId) {
-      res.status(400).json({ error: "Upload inválido" });
-      return;
-    }
-
-    const receivedSet = receivedChunkSets.get(uploadId);
-    if (!receivedSet || receivedSet.size !== meta.totalChunks) {
-      res.status(400).json({ error: "Upload incompleto", received: receivedSet?.size || 0, expected: meta.totalChunks });
-      return;
-    }
-
-    const safeFilename = meta.filename;
-    const finalPath = join(deps.uploadsDir, `${uploadId}_${safeFilename}`);
-    const partPath = getPartPath(chunksDir);
-
-    // Garante consistência em disco antes de finalizar o arquivo.
-    await closeUploadHandle(uploadId);
-    await syncMetaToDisk(uploadId);
-    clearMetaCache(uploadId);
-
-    await fs.rename(partPath, finalPath);
-    await removeUpload(deps.uploadsDir, chunksDir);
-
-    if (activeUploadsByRoom.get(roomId) === uploadId) {
-      activeUploadsByRoom.delete(roomId);
-    }
-
-    const processor = new MediaProcessor(deps.roomManager);
-    const audioTracks = await processor.listAudioTracks(finalPath);
-
-    if (audioTracks.length > 1) {
-      deps.roomManager.updateState(roomId, {
-        isUploading: false,
-        uploadProgress: 100,
-        isAwaitingAudioSelection: true,
-        audioTracks,
-        selectedAudioStreamIndex: null,
-        audioSelectionErrorMessage: '',
-        pendingVideoPath: finalPath,
-        isProcessing: false,
-        processingMessage: '',
-      });
-
-      deps.roomManager.broadcastAll(roomId, {
-        type: "audio-track-selection-required",
-        audioTracks,
-        errorMessage: '',
-      });
-
-      res.json({
-        success: true,
-        filename: safeFilename,
-        requiresAudioSelection: true,
-        audioTracks,
-      });
-      return;
-    }
-
-    const selectedAudioStreamIndex = audioTracks.length === 1 ? audioTracks[0].streamIndex : undefined;
-    const processingState = await startRoomProcessing(roomId, finalPath, selectedAudioStreamIndex, audioTracks);
-
-    if (processingState.requiresAudioSelection) {
-      res.json({
-        success: true,
-        filename: safeFilename,
-        requiresAudioSelection: true,
-        audioTracks: processingState.audioTracks,
-        errorMessage: processingState.errorMessage,
-      });
-      return;
-    }
-
-    res.json({
-      success: true,
-      filename: safeFilename,
-      processing: processingState.processing,
-      ready: processingState.ready,
-    });
-  });
-
-  router.post("/audio-track/:roomId", async (req, res) => {
-    const { roomId } = req.params;
-    const room = deps.roomManager.getRoom(roomId);
-    if (!room) {
-      res.status(404).json({ error: "Sala não encontrada" });
-      return;
-    }
-
-    const auth = getAuthFromRequest(req, req.body);
-    const authError = ensureUploadAuthorized(roomId, auth.token, deps);
-    if (authError) { res.status(authError.status).json({ error: authError.error }); return; }
-
-    if (room.state.isProcessing) {
-      res.status(409).json({ error: "A sala já está em processamento" });
-      return;
-    }
-
-    if (!room.state.isAwaitingAudioSelection) {
-      res.status(409).json({ error: "Não há seleção de faixa de áudio pendente" });
-      return;
-    }
-
-    const streamIndex = Number(req.body?.streamIndex);
-    if (!Number.isInteger(streamIndex)) {
-      res.status(400).json({ error: "Faixa de áudio inválida" });
-      return;
-    }
-
-    const selectedTrack = room.state.audioTracks.find((track) => track.streamIndex === streamIndex);
-    if (!selectedTrack) {
-      res.status(400).json({ error: "Faixa de áudio não encontrada" });
-      return;
-    }
-
-    if (!room.state.pendingVideoPath) {
-      res.status(400).json({ error: "Arquivo pendente não encontrado" });
-      return;
-    }
-
-    const processingState = await startRoomProcessing(roomId, room.state.pendingVideoPath, streamIndex, room.state.audioTracks);
-
-    if (processingState.requiresAudioSelection) {
-      res.json({
-        success: true,
-        requiresAudioSelection: true,
-        audioTracks: processingState.audioTracks,
-        errorMessage: processingState.errorMessage,
-      });
-      return;
-    }
-
-    res.json({
-      success: true,
-      processing: processingState.processing,
-      ready: processingState.ready,
-    });
-  });
-
-  router.post("/cancel-pending/:roomId", async (req, res) => {
-    const { roomId } = req.params;
-    const room = deps.roomManager.getRoom(roomId);
-    if (!room) {
-      res.status(404).json({ error: "Sala não encontrada" });
-      return;
-    }
-
-    const auth = getAuthFromRequest(req, req.body);
-    const authError = ensureUploadAuthorized(roomId, auth.token, deps);
-    if (authError) {
-      res.status(authError.status).json({ error: authError.error });
-      return;
-    }
-
-    if (room.state.isProcessing) {
-      res.status(409).json({ error: "Não é possível cancelar enquanto o arquivo está em processamento" });
-      return;
-    }
-
-    if (!room.state.pendingVideoPath) {
-      res.status(400).json({ error: "Nenhum arquivo pendente para cancelar" });
-      return;
-    }
-
-    const pendingPath = room.state.pendingVideoPath;
-    const uploadsRoot = resolve(deps.uploadsDir);
-    const resolvedPendingPath = resolve(pendingPath);
-
-    if (!resolvedPendingPath.startsWith(uploadsRoot)) {
-      res.status(403).json({ error: "Arquivo pendente inválido" });
-      return;
-    }
-
-    if (existsSync(pendingPath)) {
-      try {
-        await rm(pendingPath, { force: true });
-      } catch (error) {
-        logger.error("UploadRoute", `Falha ao remover arquivo pendente ${pendingPath}`, error);
-      }
-    }
-
-    await removeRoomSubtitles(roomId);
-
-    deps.roomManager.updateState(roomId, {
-      isUploading: false,
-      uploadProgress: 0,
-      pendingVideoPath: '',
-      isAwaitingAudioSelection: false,
-      audioTracks: [],
-      selectedAudioStreamIndex: null,
-      audioSelectionErrorMessage: '',
-      isProcessing: false,
-      processingMessage: '',
-    });
-
-    deps.roomManager.broadcastAll(roomId, {
-      type: "pending-upload-cancelled",
-    });
-
-    res.json({ success: true });
-  });
-
-  router.post("/progress/:roomId", async (req, res) => {
-    const { roomId } = req.params;
-
-    const room = deps.roomManager.getRoom(roomId);
-    if (!room) {
-      res.status(404).json({ error: "Sala não encontrada" });
-      return;
-    }
-
-    const body = req.body;
-    const auth = getAuthFromRequest(req, body);
-    const authError = ensureUploadAuthorized(roomId, auth.token, deps);
-    if (authError) { res.status(authError.status).json({ error: authError.error }); return; }
-
-    const bodyUploadId = typeof body.uploadId === "string" ? body.uploadId : "";
-
-    // Mantém compatibilidade: este endpoint serve para atualizar lastActivity/sinal de atividade,
-    // mas o progresso deve ser derivado dos chunks recebidos no servidor.
-    const effectiveUploadId = bodyUploadId || activeUploadsByRoom.get(roomId);
-
-    if (effectiveUploadId) {
-      const chunksDir = resolveUploadDir(deps.uploadsDir, effectiveUploadId);
-      if (!chunksDir) {
-        res.status(400).json({ error: "Upload inválido" });
-        return;
-      }
-
-      if (existsSync(chunksDir)) {
-        activeUploadsByRoom.set(roomId, effectiveUploadId);
-        markActivity(chunksDir, effectiveUploadId).catch((error) => {
-          logger.error("UploadRoute", `Falha ao marcar atividade do upload ${effectiveUploadId}`, error);
-        });
-
-        const meta = metaCache.get(effectiveUploadId) || await getOrLoadMeta(chunksDir, effectiveUploadId);
-        if (meta && meta.roomId === roomId) {
-          const receivedSet = receivedChunkSets.get(effectiveUploadId) || new Set(meta.receivedChunks || []);
-          receivedChunkSets.set(effectiveUploadId, receivedSet);
-
-          const progress = computeUploadProgress(meta, receivedSet);
-          deps.roomManager.updateState(roomId, { isUploading: true, uploadProgress: progress });
-          maybeBroadcastUploadProgress(roomId, deps, progress);
-          res.json({ success: true, progress });
-          return;
+        if (!filePath.startsWith(subtitlesDir)) {
+            res.status(400).json({ error: "Filename inválido" });
+            return;
         }
-      }
-    }
 
-    res.json({ success: true });
-  });
+        if (!existsSync(filePath)) {
+            res.status(404).json({ error: "Legenda não encontrada" });
+            return;
+        }
 
-  router.post("/subtitle/:roomId", async (req: Request, res: Response) => {
-    const roomId = req.params.roomId as string;
-    const room = deps.roomManager.getRoom(roomId);
-    if (!room) {
-      res.status(404).json({ error: "Sala não encontrada" });
-      return;
-    }
-
-    const auth = getAuthFromRequest(req);
-    const authError = ensureUploadAuthorized(roomId, auth.token, deps);
-    if (authError) { res.status(authError.status).json({ error: authError.error }); return; }
-
-    const subtitlesDir = getSubtitlesDir(deps.uploadsDir, roomId);
-    if (!existsSync(subtitlesDir)) {
-      mkdirSync(subtitlesDir, { recursive: true });
-    }
-
-    const chunks: Buffer[] = [];
-    let totalSubtitleBytes = 0;
-    for await (const chunk of req) {
-      totalSubtitleBytes += chunk.length;
-      if (totalSubtitleBytes > MAX_SUBTITLE_SIZE_BYTES) {
-        res.status(413).json({ error: "Legenda excede o tamanho máximo permitido" });
-        return;
-      }
-
-      chunks.push(chunk);
-    }
-    const buffer = Buffer.concat(chunks);
-
-    const rawFilename = (req.headers["x-filename"] as string) || "subtitle.srt";
-    const safeFilename = sanitizeUploadFilename(basename(rawFilename));
-    const displayName = rawFilename.replace(/\.srt$/i, "");
-    const filePath = join(subtitlesDir, safeFilename);
-
-    await fs.writeFile(filePath, buffer);
-    deps.roomManager.addSubtitle(roomId, safeFilename, displayName);
-
-    deps.roomManager.broadcastAll(roomId, {
-      type: "subtitle-added",
-      filename: safeFilename,
+        try {
+            res.setHeader("Content-Type", "text/plain; charset=utf-8");
+            const buffer = await fs.readFile(filePath);
+            const content = decodeSubtitleBuffer(buffer);
+            res.send(content);
+        } catch (e) {
+            logger.error("UploadRoute", `Falha ao ler legenda ${filePath}`, e);
+            res.status(500).json({ error: "Erro ao ler legenda" });
+        }
     });
 
-    res.json({ success: true, filename: safeFilename, displayName });
-  });
+    router.delete("/subtitle/:roomId/:filename", async (req, res) => {
+        const roomId = req.params.roomId as string;
+        const room = deps.roomManager.getRoom(roomId);
+        if (!room) {
+            res.status(404).json({ error: "Sala não encontrada" });
+            return;
+        }
 
-  router.get("/subtitles/:roomId", (req, res) => {
-    try {
-      const roomId = req.params.roomId as string;
-      requireRoomAccess(deps.roomManager, roomId, req);
-      const subtitles = deps.roomManager.getSubtitles(roomId);
-      res.json({ subtitles });
-    } catch (error) {
-      logger.error("UploadRoute", "Falha ao listar legendas", error);
-      res.status(403).json({ error: "Sem permissão para acessar legendas" });
-    }
-  });
+        const auth = getAuthFromRequest(req);
+        const authError = ensureUploadAuthorized(roomId, auth.token, deps);
+        if (authError) { res.status(authError.status).json({ error: authError.error }); return; }
 
-  router.get("/subtitle/:roomId/:filename", async (req, res) => {
-    const roomId = req.params.roomId as string;
+        const subtitlesDir = getSubtitlesDir(deps.uploadsDir, roomId);
+        const filename = basename(req.params.filename);
+        const filePath = join(subtitlesDir, filename);
 
-    try {
-      requireRoomAccess(deps.roomManager, roomId, req);
-    } catch (error) {
-      logger.error("UploadRoute", "Falha ao carregar legenda", error);
-      res.status(403).json({ error: "Sem permissão para acessar legenda" });
-      return;
-    }
+        if (!filePath.startsWith(subtitlesDir)) {
+            res.status(400).json({ error: "Filename inválido" });
+            return;
+        }
 
-    const subtitlesDir = getSubtitlesDir(deps.uploadsDir, roomId);
-    const filename = basename(req.params.filename);
-    const filePath = join(subtitlesDir, filename);
+        if (existsSync(filePath)) {
+            try {
+                await rm(filePath, { force: true });
+            } catch (e) {
+                logger.error("UploadRoute", `Falha ao remover legenda ${filePath}`, e);
+            }
+        }
+        deps.roomManager.removeSubtitle(roomId, filename);
 
-    if (!filePath.startsWith(subtitlesDir)) {
-      res.status(400).json({ error: "Filename inválido" });
-      return;
-    }
+        res.json({ success: true });
+    });
 
-    if (!existsSync(filePath)) {
-      res.status(404).json({ error: "Legenda não encontrada" });
-      return;
-    }
-
-    try {
-      res.setHeader("Content-Type", "text/plain; charset=utf-8");
-      const buffer = await fs.readFile(filePath);
-      const content = decodeSubtitleBuffer(buffer);
-      res.send(content);
-    } catch (e) {
-      logger.error("UploadRoute", `Falha ao ler legenda ${filePath}`, e);
-      res.status(500).json({ error: "Erro ao ler legenda" });
-    }
-  });
-
-  router.delete("/subtitle/:roomId/:filename", async (req, res) => {
-    const roomId = req.params.roomId as string;
-    const room = deps.roomManager.getRoom(roomId);
-    if (!room) {
-      res.status(404).json({ error: "Sala não encontrada" });
-      return;
-    }
-
-    const auth = getAuthFromRequest(req);
-    const authError = ensureUploadAuthorized(roomId, auth.token, deps);
-    if (authError) { res.status(authError.status).json({ error: authError.error }); return; }
-
-    const subtitlesDir = getSubtitlesDir(deps.uploadsDir, roomId);
-    const filename = basename(req.params.filename);
-    const filePath = join(subtitlesDir, filename);
-
-    if (!filePath.startsWith(subtitlesDir)) {
-      res.status(400).json({ error: "Filename inválido" });
-      return;
-    }
-
-    if (existsSync(filePath)) {
-      try {
-        await rm(filePath, { force: true });
-      } catch (e) {
-        logger.error("UploadRoute", `Falha ao remover legenda ${filePath}`, e);
-      }
-    }
-    deps.roomManager.removeSubtitle(roomId, filename);
-
-    res.json({ success: true });
-  });
-
-  return router;
+    return router;
 }

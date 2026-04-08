@@ -1,4 +1,5 @@
 import { TextChannel } from "discord.js";
+import type { Client } from "discord.js";
 import WebSocket from "ws";
 import { activeWatchSession, setActiveWatchSession, ActiveWatchSession } from "../state";
 import * as playerApi from "./player-api";
@@ -6,24 +7,63 @@ import { buildSessionEmbed } from "../ui/embeds";
 import { buildSessionComponents } from "../ui/components";
 import { logger } from "../../shared/logger";
 import db from "../../database";
+import type { SelectedEpisode, SessionRating } from "../../shared/types";
 
 const SESSION_CHECK_INTERVAL = 5000;
 const RECONNECT_DELAY = 2000;
 const MAX_SESSION_DURATION = 4 * 60 * 60 * 1000;
-
-let monitorSocket: WebSocket | null = null;
-let monitorRoomId: string | null = null;
-let checkInterval: NodeJS.Timeout | null = null;
-let reconnectTimeout: NodeJS.Timeout | null = null;
-let lastStatus: "waiting" | "playing" | "ended" = "waiting";
-let lastViewerIds: Set<string> = new Set();
-let reconnectAttempts = 0;
 const MAX_RECONNECT_DELAY = 30000;
 
-export const startSessionMonitor = (client: any) => {
-    if (checkInterval) clearInterval(checkInterval);
+interface WsViewersPayload {
+    viewers: { discordId: string; username: string }[];
+}
 
-    checkInterval = setInterval(() => {
+interface WsSessionStatusPayload {
+    status: "waiting" | "playing" | "ended";
+    viewerCount?: number;
+    count?: number;
+    viewers: { discordId: string; username: string }[];
+    ratings: SessionRatingPayload[];
+    allRated?: boolean;
+}
+
+interface SessionRatingPayload {
+    discordId: string;
+    username: string;
+    rating: number;
+}
+
+interface WsAllRatingsPayload {
+    ratings: SessionRatingPayload[];
+}
+
+interface WsNextEpisodePayload {
+    movieName?: string;
+    selectedEpisode?: SelectedEpisode;
+}
+
+interface WsMessage {
+    type: string;
+}
+
+const monitorState = {
+    socket: null as WebSocket | null,
+    roomId: null as string | null,
+    checkInterval: null as NodeJS.Timeout | null,
+    reconnectTimeout: null as NodeJS.Timeout | null,
+    reconnectAttempts: 0,
+    lastStatus: "waiting" as "waiting" | "playing" | "ended",
+    lastViewerIds: new Set<string>(),
+    finalizing: false,
+    isEpisodeTransition: false,
+    episodeTransitionMovieName: null as string | null,
+    episodeTransitionEpisode: null as SelectedEpisode | null,
+};
+
+export const startSessionMonitor = (client: Client) => {
+    if (monitorState.checkInterval) clearInterval(monitorState.checkInterval);
+
+    monitorState.checkInterval = setInterval(() => {
         const session = activeWatchSession;
 
         if (!session) {
@@ -40,7 +80,8 @@ export const startSessionMonitor = (client: any) => {
             return;
         }
 
-        if (!monitorSocket || monitorSocket.readyState === WebSocket.CLOSED || monitorRoomId !== session.roomId) {
+        const socketClosed = !monitorState.socket || monitorState.socket.readyState === WebSocket.CLOSED;
+        if (socketClosed || monitorState.roomId !== session.roomId) {
             logger.info("SessionMonitor", `Conectando ao WS: room=${session.roomId}`);
             connectToSession(client, session);
         }
@@ -48,69 +89,65 @@ export const startSessionMonitor = (client: any) => {
 };
 
 function resetMonitorState() {
-    lastStatus = "waiting";
-    lastViewerIds = new Set();
-    monitorRoomId = null;
-    reconnectAttempts = 0;
-    isEpisodeTransition = false;
-    episodeTransitionMovieName = null;
-    episodeTransitionEpisode = null;
+    monitorState.lastStatus = "waiting";
+    monitorState.lastViewerIds = new Set();
+    monitorState.roomId = null;
+    monitorState.reconnectAttempts = 0;
+    monitorState.finalizing = false;
+    monitorState.isEpisodeTransition = false;
+    monitorState.episodeTransitionMovieName = null;
+    monitorState.episodeTransitionEpisode = null;
 }
-
-let finalizing = false;
-let isEpisodeTransition = false;
-let episodeTransitionMovieName: string | null = null;
-let episodeTransitionEpisode: any = null;
 
 function closeSocket() {
-    if (reconnectTimeout) {
-        clearTimeout(reconnectTimeout);
-        reconnectTimeout = null;
+    if (monitorState.reconnectTimeout) {
+        clearTimeout(monitorState.reconnectTimeout);
+        monitorState.reconnectTimeout = null;
     }
 
-    if (monitorSocket) {
-        monitorSocket.onclose = null;
-        monitorSocket.onerror = null;
-        monitorSocket.onmessage = null;
-        monitorSocket.onopen = null;
-        monitorSocket.close();
-        monitorSocket = null;
+    if (monitorState.socket) {
+        monitorState.socket.onclose = null;
+        monitorState.socket.onerror = null;
+        monitorState.socket.onmessage = null;
+        monitorState.socket.onopen = null;
+        monitorState.socket.close();
+        monitorState.socket = null;
     }
 }
 
-function connectToSession(client: any, session: ActiveWatchSession) {
+function connectToSession(client: Client, session: ActiveWatchSession) {
     closeSocket();
-    monitorRoomId = session.roomId;
-    finalizing = false;
-    isEpisodeTransition = false;
-    episodeTransitionMovieName = null;
-    episodeTransitionEpisode = null;
+    monitorState.roomId = session.roomId;
+    monitorState.finalizing = false;
+    monitorState.isEpisodeTransition = false;
+    monitorState.episodeTransitionMovieName = null;
+    monitorState.episodeTransitionEpisode = null;
 
     const wsUrl = buildWsUrl(session.roomId);
-    monitorSocket = new WebSocket(wsUrl, {
+    monitorState.socket = new WebSocket(wsUrl, {
         headers: {
             "x-room-token": session.hostToken,
         },
     });
 
-    monitorSocket.onopen = () => {
+    monitorState.socket.onopen = () => {
         logger.info("SessionMonitor", `WS aberto: room=${session.roomId}`);
-        reconnectAttempts = 0;
+        monitorState.reconnectAttempts = 0;
         try {
-            monitorSocket?.send(JSON.stringify({ type: "session-status" }));
+            monitorState.socket?.send(JSON.stringify({ type: "session-status" }));
         } catch {
-            monitorSocket?.close();
+            monitorState.socket?.close();
         }
     };
 
-    monitorSocket.onmessage = async (event) => {
+    monitorState.socket.onmessage = async (event) => {
         const currentSession = activeWatchSession;
         if (!currentSession || currentSession.roomId !== session.roomId) return;
 
-        let data: any = null;
+        let data: WsMessage | null = null;
         try {
             const rawData = typeof event.data === "string" ? event.data : event.data.toString();
-            data = JSON.parse(rawData);
+            data = JSON.parse(rawData) as WsMessage;
         } catch {
             return;
         }
@@ -119,47 +156,47 @@ function connectToSession(client: any, session: ActiveWatchSession) {
 
         switch (data.type) {
             case "viewers":
-                await handleViewersUpdate(client, currentSession, data);
+                await handleViewersUpdate(client, currentSession, data as unknown as WsViewersPayload);
                 break;
             case "session-status":
-                await handleSessionStatus(client, currentSession, data);
+                await handleSessionStatus(client, currentSession, data as unknown as WsSessionStatusPayload);
                 break;
             case "session-ending":
             case "session-ended":
                 requestSessionStatus();
                 break;
             case "all-ratings-received":
-                if (isEpisodeTransition) {
-                    await handleEpisodeRatingsReceived(client, currentSession, data);
+                if (monitorState.isEpisodeTransition) {
+                    await handleEpisodeRatingsReceived(client, currentSession, data as unknown as WsAllRatingsPayload);
                 } else {
-                    await handleAllRatingsReceived(client, currentSession, data);
+                    await handleAllRatingsReceived(client, currentSession, data as unknown as WsAllRatingsPayload);
                 }
                 break;
             case "episode-ending":
-                isEpisodeTransition = true;
-                episodeTransitionMovieName = currentSession.movieName;
-                episodeTransitionEpisode = currentSession.selectedEpisode;
+                monitorState.isEpisodeTransition = true;
+                monitorState.episodeTransitionMovieName = currentSession.movieName;
+                monitorState.episodeTransitionEpisode = currentSession.selectedEpisode ?? null;
                 break;
             case "next-episode":
-                isEpisodeTransition = false;
-                episodeTransitionMovieName = null;
-                episodeTransitionEpisode = null;
-                await handleNextEpisode(client, currentSession, data);
+                monitorState.isEpisodeTransition = false;
+                monitorState.episodeTransitionMovieName = null;
+                monitorState.episodeTransitionEpisode = null;
+                await handleNextEpisode(client, currentSession, data as unknown as WsNextEpisodePayload);
                 break;
             case "episode-ratings-received":
                 break;
         }
     };
 
-    monitorSocket.onclose = () => {
+    monitorState.socket.onclose = () => {
         logger.info("SessionMonitor", `WS fechado: room=${session.roomId}`);
-        monitorSocket = null;
+        monitorState.socket = null;
         scheduleReconnect(client);
     };
 
-    monitorSocket.onerror = () => {
+    monitorState.socket.onerror = () => {
         logger.warn("SessionMonitor", `WS erro: room=${session.roomId}`);
-        monitorSocket?.close();
+        monitorState.socket?.close();
     };
 }
 
@@ -172,17 +209,17 @@ function buildWsUrl(roomId: string): string {
     return `${wsBase}/ws?room=${roomId}&clientId=${clientId}`;
 }
 
-function scheduleReconnect(client: any) {
-    if (!activeWatchSession || monitorRoomId !== activeWatchSession.roomId) return;
-    if (reconnectTimeout) return;
-    if (monitorSocket && monitorSocket.readyState === WebSocket.OPEN) return;
+function scheduleReconnect(client: Client) {
+    if (!activeWatchSession || monitorState.roomId !== activeWatchSession.roomId) return;
+    if (monitorState.reconnectTimeout) return;
+    if (monitorState.socket && monitorState.socket.readyState === WebSocket.OPEN) return;
 
-    const delay = Math.min(RECONNECT_DELAY * Math.pow(2, reconnectAttempts), MAX_RECONNECT_DELAY);
-    reconnectAttempts++;
-    logger.info("SessionMonitor", `Reconectando em ${delay}ms (tentativa ${reconnectAttempts})`);
+    const delay = Math.min(RECONNECT_DELAY * Math.pow(2, monitorState.reconnectAttempts), MAX_RECONNECT_DELAY);
+    monitorState.reconnectAttempts++;
+    logger.info("SessionMonitor", `Reconectando em ${delay}ms (tentativa ${monitorState.reconnectAttempts})`);
 
-    reconnectTimeout = setTimeout(() => {
-        reconnectTimeout = null;
+    monitorState.reconnectTimeout = setTimeout(() => {
+        monitorState.reconnectTimeout = null;
         if (activeWatchSession) {
             connectToSession(client, activeWatchSession);
         }
@@ -190,38 +227,38 @@ function scheduleReconnect(client: any) {
 }
 
 function requestSessionStatus() {
-    if (!monitorSocket || monitorSocket.readyState !== WebSocket.OPEN) return;
-    monitorSocket.send(JSON.stringify({ type: "session-status" }));
+    if (!monitorState.socket || monitorState.socket.readyState !== WebSocket.OPEN) return;
+    monitorState.socket.send(JSON.stringify({ type: "session-status" }));
 }
 
-async function handleViewersUpdate(client: any, session: ActiveWatchSession, data: any) {
-    const viewers: { discordId: string; username: string }[] = data.viewers || [];
+async function handleViewersUpdate(client: Client, session: ActiveWatchSession, data: WsViewersPayload) {
+    const viewers = data.viewers || [];
     const currentIds = new Set(viewers.map(v => v.discordId));
 
-    const hasChanges = currentIds.size !== lastViewerIds.size ||
-        [...currentIds].some(id => !lastViewerIds.has(id));
+    const hasChanges = currentIds.size !== monitorState.lastViewerIds.size ||
+        [...currentIds].some(id => !monitorState.lastViewerIds.has(id));
 
-    if (hasChanges && lastStatus === "playing") {
-        lastViewerIds = currentIds;
+    if (hasChanges && monitorState.lastStatus === "playing") {
+        monitorState.lastViewerIds = currentIds;
         await updateSessionEmbed(client, session, "playing", viewers.length, viewers);
     } else {
-        lastViewerIds = currentIds;
+        monitorState.lastViewerIds = currentIds;
     }
 }
 
-async function handleSessionStatus(client: any, session: ActiveWatchSession, data: any) {
+async function handleSessionStatus(client: Client, session: ActiveWatchSession, data: WsSessionStatusPayload) {
     const currentStatus = data.status || "waiting";
     const viewerCount = data.viewerCount ?? data.count ?? 0;
     const viewers = data.viewers || [];
     const ratings = data.ratings || [];
-    const currentIds = new Set<string>(viewers.map((v: any) => v.discordId));
+    const currentIds = new Set<string>(viewers.map(v => v.discordId));
 
-    const statusChanged = lastStatus !== currentStatus;
-    const viewersChanged = currentIds.size !== lastViewerIds.size ||
-        [...currentIds].some(id => !lastViewerIds.has(id));
+    const statusChanged = monitorState.lastStatus !== currentStatus;
+    const viewersChanged = currentIds.size !== monitorState.lastViewerIds.size ||
+        [...currentIds].some(id => !monitorState.lastViewerIds.has(id));
 
-    lastStatus = currentStatus;
-    lastViewerIds = currentIds;
+    monitorState.lastStatus = currentStatus;
+    monitorState.lastViewerIds = currentIds;
 
     if (statusChanged) {
         await updateSessionEmbed(client, session, currentStatus, viewerCount, viewers, ratings);
@@ -234,33 +271,33 @@ async function handleSessionStatus(client: any, session: ActiveWatchSession, dat
     }
 }
 
-async function handleAllRatingsReceived(client: any, session: ActiveWatchSession, data: any) {
+async function handleAllRatingsReceived(client: Client, session: ActiveWatchSession, data: WsAllRatingsPayload) {
     const ratings = data.ratings || [];
 
-    if (lastStatus !== "ended") {
-        lastStatus = "ended";
+    if (monitorState.lastStatus !== "ended") {
+        monitorState.lastStatus = "ended";
     }
 
-    await updateSessionEmbed(client, session, "ended", lastViewerIds.size, [], ratings);
+    await updateSessionEmbed(client, session, "ended", monitorState.lastViewerIds.size, [], ratings);
     await finalizeSession(session, ratings);
 }
 
-async function handleNextEpisode(client: any, session: ActiveWatchSession, data: any) {
+async function handleNextEpisode(client: Client, session: ActiveWatchSession, data: WsNextEpisodePayload) {
     const newMovieName = data.movieName || session.movieName;
     const selectedEpisode = data.selectedEpisode || undefined;
 
     session.movieName = newMovieName;
     session.selectedEpisode = selectedEpisode;
 
-    lastStatus = "waiting";
+    monitorState.lastStatus = "waiting";
 
     logger.info("SessionMonitor", `Próximo episódio: ${newMovieName}`);
-    await updateSessionEmbed(client, session, "waiting", lastViewerIds.size, []);
+    await updateSessionEmbed(client, session, "waiting", monitorState.lastViewerIds.size, []);
 }
 
-async function handleEpisodeRatingsReceived(client: any, session: ActiveWatchSession, data: any) {
-    const ratings: { discordId: string; username: string; rating: number }[] = data.ratings || [];
-    const movieName = episodeTransitionMovieName || session.movieName;
+async function handleEpisodeRatingsReceived(client: Client, session: ActiveWatchSession, data: WsAllRatingsPayload) {
+    const ratings: SessionRatingPayload[] = data.ratings || [];
+    const movieName = monitorState.episodeTransitionMovieName || session.movieName;
 
     logger.info("SessionMonitor", `Avaliações do episódio recebidas: ${movieName} (${ratings.length} votos)`);
 
@@ -273,7 +310,7 @@ async function handleEpisodeRatingsReceived(client: any, session: ActiveWatchSes
 
         logger.info("SessionMonitor", `Votos do episódio persistidos: ${movieName}`);
     } catch (dbError) {
-        console.error("[SessionMonitor] Falha ao persistir votos do episódio:", dbError);
+        logger.error("SessionMonitor", "Falha ao persistir votos do episódio", dbError);
     }
 
     try {
@@ -284,9 +321,9 @@ async function handleEpisodeRatingsReceived(client: any, session: ActiveWatchSes
                 session.tmdbInfo,
                 "ended",
                 session.hostUsername,
-                lastViewerIds.size,
-                ratings.map(r => ({ ...r, discordId: r.discordId || '', username: r.username || 'User' })),
-                episodeTransitionEpisode,
+                monitorState.lastViewerIds.size,
+                ratings.map(r => ({ ...r, discordId: r.discordId || '', username: r.username || 'User' })) as SessionRating[],
+                monitorState.episodeTransitionEpisode ?? undefined,
                 session.createdAt
             );
 
@@ -294,13 +331,13 @@ async function handleEpisodeRatingsReceived(client: any, session: ActiveWatchSes
             logger.info("SessionMonitor", `Embed de avaliação do episódio enviado: ${movieName}`);
         }
     } catch (error) {
-        console.error("[SessionMonitor] Falha ao enviar embed de avaliação do episódio:", error);
+        logger.error("SessionMonitor", "Falha ao enviar embed de avaliação do episódio", error);
     }
 }
 
-async function finalizeSession(session: ActiveWatchSession, ratings: any[]) {
-    if (finalizing) return;
-    finalizing = true;
+async function finalizeSession(session: ActiveWatchSession, ratings: SessionRatingPayload[]) {
+    if (monitorState.finalizing) return;
+    monitorState.finalizing = true;
 
     try {
         logger.info("SessionMonitor", `Finalizando sessão: room=${session.roomId} ratings=${ratings.length}`);
@@ -320,19 +357,19 @@ async function finalizeSession(session: ActiveWatchSession, ratings: any[]) {
 
         await playerApi.finalizeSession(session.roomId, session.hostToken);
     } catch (dbError) {
-        console.error("[SessionMonitor] Failed to persist session data:", dbError);
+        logger.error("SessionMonitor", "Falha ao persistir dados da sessão", dbError);
     }
 
     setActiveWatchSession(null);
 }
 
 async function updateSessionEmbed(
-    client: any,
+    client: Client,
     session: ActiveWatchSession,
     status: "playing" | "waiting" | "ended",
     viewerCount: number = 0,
-    viewers: any[] = [],
-    ratings: any[] = []
+    viewers: { discordId: string; username: string }[] = [],
+    ratings: SessionRatingPayload[] = []
 ) {
     try {
         const channel = await client.channels.fetch(session.channelId) as TextChannel;
@@ -347,7 +384,7 @@ async function updateSessionEmbed(
             status,
             session.hostUsername,
             viewerCount,
-            ratings.map(r => ({ ...r, discordId: r.discordId || '', username: r.username || 'User' })),
+            ratings.map(r => ({ ...r, discordId: r.discordId || '', username: r.username || 'User' })) as SessionRating[],
             session.selectedEpisode,
             session.createdAt
         );
@@ -361,6 +398,6 @@ async function updateSessionEmbed(
         });
 
     } catch (error) {
-        console.error("[SessionMonitor] Failed to update Discord message:", error);
+        logger.error("SessionMonitor", "Falha ao atualizar mensagem do Discord", error);
     }
 }

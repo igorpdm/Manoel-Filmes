@@ -1,32 +1,8 @@
 import { TTLCache } from "./utils/ttl-cache";
-import type { SelectedEpisode, SessionRating } from "../shared/types";
+import type { SelectedEpisode, SessionRating, TmdbSearchResult } from "../shared/types";
 
-export interface TmdbSearchResult {
-    id: number;
-    title: string;
-    poster_url: string | null;
-    overview: string;
-    release_date: string;
-    vote_average: number;
-    genres: string[];
-    media_type: "movie" | "tv";
-    seasons?: {
-        id: number;
-        seasonNumber: number;
-        name: string;
-        episodeCount: number;
-        posterPath: string | null;
-        episodes: {
-            id: number;
-            episodeNumber: number;
-            name: string;
-            overview: string;
-            stillPath: string | null;
-            airDate: string;
-            runtime: number | null;
-        }[];
-    }[];
-}
+export type { TmdbSearchResult };
+
 
 export interface VotingEntry {
     movieKey: string;
