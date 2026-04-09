@@ -337,6 +337,27 @@ function bindSessionModals() {
     dom.btnHome.addEventListener('click', () => {
         closeWindowOrRedirect('/');
     });
+
+    dom.btnCancelSession.addEventListener('click', () => {
+        dom.modalConfirmCancel.classList.remove('hidden');
+    });
+
+    dom.btnDismissCancel.addEventListener('click', () => {
+        dom.modalConfirmCancel.classList.add('hidden');
+    });
+
+    dom.btnConfirmCancel.addEventListener('click', async () => {
+        try {
+            await fetch(`/api/discord-cancel-session/${state.roomId}`, {
+                method: 'POST',
+                headers: buildRoomHeaders({ 'Content-Type': 'application/json' }),
+                body: JSON.stringify({ token: state.userToken }),
+            });
+        } catch {
+            // falha silenciosa — o WS event vai disparar se o servidor processou
+        }
+        dom.modalConfirmCancel.classList.add('hidden');
+    });
 }
 
 function showSessionCompletedScreen() {

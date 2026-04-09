@@ -120,4 +120,9 @@ export const dom = {
     nextEpInfo: document.getElementById('next-ep-info'),
     btnCancelNextEp: document.getElementById('btn-cancel-next-ep'),
     btnProceedNextEp: document.getElementById('btn-proceed-next-ep'),
+
+    btnCancelSession: document.getElementById('btn-cancel-session'),
+    modalConfirmCancel: document.getElementById('modal-confirm-cancel'),
+    btnDismissCancel: document.getElementById('btn-dismiss-cancel'),
+    btnConfirmCancel: document.getElementById('btn-confirm-cancel'),
 };

@@ -298,6 +298,11 @@ function handleMessage(data) {
             dom.modalRatingResults.classList.add('hidden');
             handleSessionEnded();
             break;
+        case 'session-cancelled':
+            dom.modalRatingEl?.classList.add('hidden');
+            dom.modalRatingResults?.classList.add('hidden');
+            handleSessionEnded();
+            break;
         case 'all-ratings-received':
             if (data.ratingProgress) {
                 state.ratingProgress = data.ratingProgress;

@@ -182,6 +182,7 @@ export function updateHostUI() {
         || state.roomStage === 'audio-selection';
 
     if (state.isHost) {
+        dom.btnCancelSession.classList.remove('hidden');
         dom.btnEndSession.classList.remove('hidden');
         updateNextEpisodeButton();
 
@@ -208,6 +209,7 @@ export function updateHostUI() {
         dom.uploadZone.classList.remove('hidden');
         return;
     } else {
+        dom.btnCancelSession.classList.add('hidden');
         dom.btnEndSession.classList.add('hidden');
         dom.btnNextEpisode?.classList.add('hidden');
         if (state.hasVideo) return;

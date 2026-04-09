@@ -64,6 +64,10 @@
                     Próximo Ep.
                 </button>
 
+                <button id="btn-cancel-session" class="btn-secondary hidden" title="Cancelar Sessão">
+                    ✕ Cancelar
+                </button>
+
                 <button id="btn-end-session" class="btn-danger hidden" title="Encerrar Sessão">
                     <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M18.36 6.64a9 9 0 11-12.73 0" />
@@ -367,6 +371,17 @@
             <div class="modal-actions">
                 <button id="btn-cancel-end" class="btn-secondary">Cancelar</button>
                 <button id="btn-confirm-end" class="btn-danger">Encerrar</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="modal-confirm-cancel" class="modal-overlay hidden">
+        <div class="modal-content">
+            <h3>Cancelar Sessão?</h3>
+            <p>A sessão será encerrada imediatamente sem registrar no histórico. Todos os participantes serão desconectados.</p>
+            <div class="modal-actions">
+                <button id="btn-dismiss-cancel" class="btn-secondary">Voltar</button>
+                <button id="btn-confirm-cancel" class="btn-danger">Cancelar Sessão</button>
             </div>
         </div>
     </div>

@@ -183,6 +183,9 @@ function connectToSession(client: Client, session: ActiveWatchSession) {
                 monitorState.episodeTransitionEpisode = null;
                 await handleNextEpisode(client, currentSession, data as unknown as WsNextEpisodePayload);
                 break;
+            case "session-cancelled":
+                await handleSessionCancelled(client, currentSession);
+                break;
             case "episode-ratings-received":
                 break;
         }
@@ -295,6 +298,14 @@ async function handleNextEpisode(client: Client, session: ActiveWatchSession, da
     await updateSessionEmbed(client, session, "waiting", monitorState.lastViewerIds.size, []);
 }
 
+async function handleSessionCancelled(client: Client, session: ActiveWatchSession) {
+    logger.info("SessionMonitor", `Sessão cancelada: room=${session.roomId}`);
+    await updateSessionEmbed(client, session, "cancelled", 0, []);
+    setActiveWatchSession(null);
+    closeSocket();
+    resetMonitorState();
+}
+
 async function handleEpisodeRatingsReceived(client: Client, session: ActiveWatchSession, data: WsAllRatingsPayload) {
     const ratings: SessionRatingPayload[] = data.ratings || [];
     const movieName = monitorState.episodeTransitionMovieName || session.movieName;
@@ -366,7 +377,7 @@ async function finalizeSession(session: ActiveWatchSession, ratings: SessionRati
 async function updateSessionEmbed(
     client: Client,
     session: ActiveWatchSession,
-    status: "playing" | "waiting" | "ended",
+    status: "playing" | "waiting" | "ended" | "cancelled",
     viewerCount: number = 0,
     viewers: { discordId: string; username: string }[] = [],
     ratings: SessionRatingPayload[] = []
@@ -390,7 +401,7 @@ async function updateSessionEmbed(
         );
 
         const playerBaseUrl = playerApi.getPlayerUrl();
-        const components = status === "ended" ? [] : buildSessionComponents(session.roomId, status, playerBaseUrl);
+        const components = (status === "ended" || status === "cancelled") ? [] : buildSessionComponents(session.roomId, status, playerBaseUrl);
 
         await message.edit({
             embeds: [embed],

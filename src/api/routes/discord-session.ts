@@ -448,6 +448,27 @@ export function createDiscordSessionRouter(deps: DiscordSessionDeps): Router {
     }
   });
 
+  router.post("/discord-cancel-session/:roomId", async (req, res) => {
+    try {
+      const roomId = parseRoomIdParam(req.params.roomId);
+      ensureSessionRoom(deps, roomId);
+
+      const payload = parseHostTokenPayload(req.body);
+      ensureHostToken(deps, roomId, payload.token);
+
+      logger.info("DiscordSession", `Cancelamento solicitado: room=${roomId}`);
+      clearRatingTimeout(roomId);
+      deps.roomManager.clearRatingRound(roomId);
+      deps.roomManager.broadcastAll(roomId, { type: "session-cancelled" });
+      await cleanupRoomUploads(deps.uploadsDir, roomId);
+      await deps.roomManager.deleteRoom(roomId);
+
+      res.json({ success: true });
+    } catch (error) {
+      sendRouteError(res, error, "DiscordSession");
+    }
+  });
+
   router.post("/next-episode/:roomId", async (req, res) => {
     try {
       const roomId = parseRoomIdParam(req.params.roomId);

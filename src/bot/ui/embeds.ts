@@ -312,7 +312,7 @@ export const buildMovieDetailEmbed = (filme: any) => {
   return embed;
 };
 
-export type SessionStatusType = "waiting" | "playing" | "ended";
+export type SessionStatusType = "waiting" | "playing" | "ended" | "cancelled";
 
 interface SessionRating {
   discordId: string;
@@ -334,6 +334,7 @@ export const buildSessionEmbed = (
     waiting: { emoji: "⏳", text: "Aguardando host", color: 0xf39c12 },
     playing: { emoji: "🎬", text: "Em andamento", color: 0x2ecc71 },
     ended: { emoji: "✅", text: "Sessão concluída", color: 0x9b59b6 },
+    cancelled: { emoji: "❌", text: "Sessão cancelada", color: 0xe74c3c },
   };
 
   const config = statusConfig[status];
@@ -407,7 +408,9 @@ export const buildSessionEmbed = (
     ? "Clique no botão abaixo para entrar na sessão"
     : status === "playing"
       ? "Sessão em andamento • Clique para assistir"
-      : "Sessão encerrada • Obrigado por assistir!";
+      : status === "cancelled"
+        ? "Sessão cancelada pelo host"
+        : "Sessão encerrada • Obrigado por assistir!";
 
   if (createdAt) {
     const startTime = new Date(createdAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
