@@ -37,7 +37,6 @@ const RATING_TIMEOUT_MS = 2 * 60 * 1000;
 const ratingTimeouts = new Map<string, NodeJS.Timeout>();
 
 interface CreateDiscordSessionPayload {
-  title: string;
   movieName: string;
   movieInfo?: MovieInfo;
   selectedEpisode?: SelectedEpisode;
@@ -100,7 +99,6 @@ function parseCreateDiscordSessionPayload(raw: unknown): CreateDiscordSessionPay
   const payload = requireObject(raw);
 
   return {
-    title: optionalString(payload.title) || "Sessão de Cinema",
     movieName: optionalString(payload.movieName) || "Filme",
     movieInfo: payload.movieInfo && typeof payload.movieInfo === "object" ? (payload.movieInfo as MovieInfo) : undefined,
     selectedEpisode: parseSelectedEpisode(payload.selectedEpisode),
@@ -260,7 +258,6 @@ export function createDiscordSessionRouter(deps: DiscordSessionDeps): Router {
 
       const payload = parseCreateDiscordSessionPayload(req.body);
       const result = deps.roomManager.createDiscordSession(
-        payload.title,
         payload.movieName,
         payload.movieInfo,
         payload.discordSession,

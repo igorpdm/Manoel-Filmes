@@ -50,7 +50,6 @@ export const pendingSessionCache = new TTLCache<string, PendingSession>();
 
 export interface PendingSession {
     tmdbInfo: TmdbSearchResult;
-    sessionTitle: string;
     hostId: string;
     hostUsername: string;
     channelId: string;

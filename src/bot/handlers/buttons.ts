@@ -231,7 +231,6 @@ export const handleButton = async (interaction: ButtonInteraction) => {
     }
 
     const result = await playerApi.createDiscordSession({
-      title: pending.sessionTitle,
       movieName: displayTitle,
       movieInfo: {
         id: pending.tmdbInfo.id,

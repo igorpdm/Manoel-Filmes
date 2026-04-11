@@ -168,7 +168,6 @@ export interface Room {
     id: string;
     state: RoomState;
     clients: Set<ExtendedWebSocket>;
-    title?: string;
     movieName?: string;
     movieInfo?: MovieInfo;
     selectedEpisode?: SelectedEpisode;
@@ -209,6 +208,7 @@ export type MessageType =
     | "host-heartbeat"
     | "session-ended"
     | "session-ending"
+    | "session-cancelled"
     | "rating-progress"
     | "rating-received"
     | "all-ratings-received"

@@ -17,7 +17,6 @@ export function createRoomRouter(): Router {
             const { room } = requireRoomAccess(roomManager, roomId, req);
             const connectedUsers = roomManager.getConnectedUsers(roomId);
             res.json({
-                title: room.title || "Sessão",
                 movieName: room.movieName || "Filme",
                 viewerCount: connectedUsers.length,
                 movieInfo: room.movieInfo || null,

@@ -80,7 +80,6 @@ export const handleModalSubmit = async (interaction: ModalSubmitInteraction) => 
 
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
-    const sessionTitle = interaction.fields.getTextInputValue("session_title").trim() || "Sessão de Cinema";
     const movieQuery = interaction.fields.getTextInputValue("session_movie").trim();
 
     const tmdbInfo = await searchMovieTmdb(movieQuery);
@@ -103,7 +102,6 @@ export const handleModalSubmit = async (interaction: ModalSubmitInteraction) => 
 
       pendingSessionCache.set(message.id, {
         tmdbInfo,
-        sessionTitle,
         hostId: interaction.user.id,
         hostUsername: interaction.member instanceof GuildMember
           ? interaction.member.displayName
@@ -123,7 +121,6 @@ export const handleModalSubmit = async (interaction: ModalSubmitInteraction) => 
 
     pendingSessionCache.set(message.id, {
       tmdbInfo,
-      sessionTitle,
       hostId: interaction.user.id,
       hostUsername: interaction.member instanceof GuildMember
         ? interaction.member.displayName

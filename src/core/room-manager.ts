@@ -58,7 +58,6 @@ export class RoomManager {
     // ─── Room Lifecycle ───────────────────────────────────────────────────────
 
     createDiscordSession(
-        title: string,
         movieName: string,
         movieInfo: MovieInfo | undefined,
         discordSession: DiscordSession & { hostUsername?: string },
@@ -82,7 +81,6 @@ export class RoomManager {
 
         const room: Room = {
             ...this.buildRoom(roomId),
-            title,
             movieName,
             movieInfo,
             selectedEpisode,

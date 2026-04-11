@@ -104,13 +104,6 @@ async function handleSessao(interaction: ChatInputCommandInteraction): Promise<v
 
   const modal = new ModalBuilder().setCustomId("session_create").setTitle("🎬 Criar Sessão");
 
-  const titleInput = new TextInputBuilder()
-    .setCustomId("session_title")
-    .setLabel("Título da sessão")
-    .setPlaceholder("Sessão de Cinema")
-    .setStyle(TextInputStyle.Short)
-    .setRequired(true);
-
   const movieInput = new TextInputBuilder()
     .setCustomId("session_movie")
     .setLabel("Nome do filme ou série")
@@ -119,7 +112,6 @@ async function handleSessao(interaction: ChatInputCommandInteraction): Promise<v
     .setRequired(true);
 
   modal.addComponents(
-    new ActionRowBuilder<TextInputBuilder>().addComponents(titleInput),
     new ActionRowBuilder<TextInputBuilder>().addComponents(movieInput)
   );
 

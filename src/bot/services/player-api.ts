@@ -11,7 +11,6 @@ function buildServiceHeaders(): Record<string, string> {
 }
 
 interface CreateSessionData {
-    title: string;
     movieName: string;
     movieInfo?: MovieInfo;
     discordSession: DiscordSession & { hostUsername?: string };
