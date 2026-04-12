@@ -3,61 +3,40 @@ import { UpscalerRenderer } from './upscaler-renderer.js';
 
 const STORAGE_KEY = 'manoel_player_upscaler_settings';
 
-const algorithmConfigs = {
-    fsr1: {
-        intensityLabel: 'Sharpening',
-        min: 0,
-        max: 1,
-        step: 0.1,
-        defaultIntensity: 0.5,
-    },
-    cas: {
-        intensityLabel: 'Intensity',
-        min: 0,
-        max: 1.2,
-        step: 0.1,
-        defaultIntensity: 1.0,
-    },
-};
-
 const defaultSettings = {
     isEnabled: true,
-    algorithm: 'fsr1',
-    fsr1Intensity: algorithmConfigs.fsr1.defaultIntensity,
-    casIntensity: algorithmConfigs.cas.defaultIntensity,
+    intensity: 0.5,
 };
 
 const upscalerState = {
     renderer: null,
     isSupported: false,
-    frameRequestId: null,
+    animationFrameRequestId: null,
+    videoFrameRequestId: null,
     settings: { ...defaultSettings },
     resizeObserver: null,
 };
 
-function normalizeIntensityValue(value, algorithm) {
-    const config = algorithmConfigs[algorithm];
+function normalizeIntensityValue(value) {
     const numericValue = Number(value);
 
     if (!Number.isFinite(numericValue)) {
-        return config.defaultIntensity;
+        return defaultSettings.intensity;
     }
 
-    const clampedValue = Math.min(config.max, Math.max(config.min, numericValue));
+    const clampedValue = Math.min(1.2, Math.max(0, numericValue));
     return Math.round(clampedValue * 10) / 10;
 }
 
 function normalizeSettings(settings) {
     const safeSettings = settings && typeof settings === 'object' ? settings : {};
-    const algorithm = safeSettings.algorithm === 'cas' ? 'cas' : 'fsr1';
+    const persistedIntensity = safeSettings.intensity ?? safeSettings.fsr1Intensity ?? safeSettings.casIntensity;
 
     return {
         isEnabled: typeof safeSettings.isEnabled === 'boolean'
             ? safeSettings.isEnabled
             : defaultSettings.isEnabled,
-        algorithm,
-        fsr1Intensity: normalizeIntensityValue(safeSettings.fsr1Intensity, 'fsr1'),
-        casIntensity: normalizeIntensityValue(safeSettings.casIntensity, 'cas'),
+        intensity: normalizeIntensityValue(persistedIntensity),
     };
 }
 
@@ -68,8 +47,7 @@ function loadSettings() {
     }
 
     try {
-        const parsedSettings = JSON.parse(rawSettings);
-        upscalerState.settings = normalizeSettings(parsedSettings);
+        upscalerState.settings = normalizeSettings(JSON.parse(rawSettings));
     } catch {
         upscalerState.settings = { ...defaultSettings };
     }
@@ -80,31 +58,18 @@ function saveSettings() {
 }
 
 function stopRenderLoop() {
-    if (upscalerState.frameRequestId !== null) {
-        cancelAnimationFrame(upscalerState.frameRequestId);
-        upscalerState.frameRequestId = null;
-    }
-}
-
-function getCurrentAlgorithmConfig() {
-    return algorithmConfigs[upscalerState.settings.algorithm];
-}
-
-function getCurrentIntensity() {
-    return upscalerState.settings.algorithm === 'cas'
-        ? upscalerState.settings.casIntensity
-        : upscalerState.settings.fsr1Intensity;
-}
-
-function setCurrentIntensity(value) {
-    const normalizedValue = normalizeIntensityValue(value, upscalerState.settings.algorithm);
-
-    if (upscalerState.settings.algorithm === 'cas') {
-        upscalerState.settings.casIntensity = normalizedValue;
-        return;
+    if (
+        upscalerState.videoFrameRequestId !== null
+        && typeof dom.video?.cancelVideoFrameCallback === 'function'
+    ) {
+        dom.video.cancelVideoFrameCallback(upscalerState.videoFrameRequestId);
+        upscalerState.videoFrameRequestId = null;
     }
 
-    upscalerState.settings.fsr1Intensity = normalizedValue;
+    if (upscalerState.animationFrameRequestId !== null) {
+        cancelAnimationFrame(upscalerState.animationFrameRequestId);
+        upscalerState.animationFrameRequestId = null;
+    }
 }
 
 function shouldRenderContinuously() {
@@ -134,8 +99,6 @@ function updateCanvasVisibility() {
 function updateControls() {
     const controlsAreInteractive = upscalerState.isSupported;
     const intensityIsInteractive = controlsAreInteractive && upscalerState.settings.isEnabled;
-    const currentAlgorithmConfig = getCurrentAlgorithmConfig();
-    const currentIntensity = getCurrentIntensity();
 
     if (dom.upscalerEnabledToggle) {
         dom.upscalerEnabledToggle.checked = upscalerState.settings.isEnabled;
@@ -143,25 +106,22 @@ function updateControls() {
         dom.upscalerEnabledToggle.closest('.toggle-label')?.setAttribute('aria-disabled', String(!controlsAreInteractive));
     }
 
-    if (dom.upscalerAlgorithm) {
-        dom.upscalerAlgorithm.value = upscalerState.settings.algorithm;
-        dom.upscalerAlgorithm.disabled = !controlsAreInteractive;
+    if (dom.upscalerIntensityLabel) {
+        dom.upscalerIntensityLabel.textContent = 'Sharpening';
     }
 
-    if (dom.upscalerIntensityLabel) {
-        dom.upscalerIntensityLabel.textContent = currentAlgorithmConfig.intensityLabel;
+    if (dom.upscalerIntensityGroup) {
+        dom.upscalerIntensityGroup.classList.toggle('hidden', !upscalerState.settings.isEnabled || !upscalerState.isSupported);
     }
 
     if (dom.upscalerIntensitySlider) {
-        dom.upscalerIntensitySlider.min = String(currentAlgorithmConfig.min);
-        dom.upscalerIntensitySlider.max = String(currentAlgorithmConfig.max);
-        dom.upscalerIntensitySlider.step = String(currentAlgorithmConfig.step);
-        dom.upscalerIntensitySlider.value = String(currentIntensity);
+        dom.upscalerIntensitySlider.value = String(upscalerState.settings.intensity);
+        dom.upscalerIntensitySlider.max = '1.2';
         dom.upscalerIntensitySlider.disabled = !intensityIsInteractive;
     }
 
     if (dom.upscalerIntensityValue) {
-        dom.upscalerIntensityValue.textContent = currentIntensity.toFixed(1);
+        dom.upscalerIntensityValue.textContent = upscalerState.settings.intensity.toFixed(1);
     }
 }
 
@@ -169,8 +129,7 @@ function applySettings() {
     if (upscalerState.renderer) {
         upscalerState.renderer.setSettings({
             isEnabled: upscalerState.settings.isEnabled,
-            algorithm: upscalerState.settings.algorithm,
-            intensity: getCurrentIntensity(),
+            intensity: upscalerState.settings.intensity,
         });
     }
 
@@ -190,6 +149,8 @@ function applySettings() {
 function disableUpscaler(message) {
     upscalerState.isSupported = false;
     stopRenderLoop();
+    upscalerState.renderer?.dispose();
+    upscalerState.renderer = null;
     updateControls();
     updateCanvasVisibility();
     console.error('[Upscaler]', message);
@@ -210,30 +171,46 @@ function renderCurrentFrame() {
         upscalerState.renderer.resize();
         upscalerState.renderer.render();
     } catch (error) {
-        disableUpscaler('Falha ao inicializar o WebGL. O player usará o vídeo original.');
+        disableUpscaler('Falha ao renderizar o upscaler em WebGL2. O player usará o vídeo original.');
         console.error('[Upscaler] Render failed:', error);
     }
 }
 
-function queueNextFrame() {
+function scheduleNextFrame() {
     if (!shouldRenderContinuously()) {
         stopRenderLoop();
         return;
     }
 
-    upscalerState.frameRequestId = requestAnimationFrame(() => {
-        upscalerState.frameRequestId = null;
+    if (
+        typeof dom.video?.requestVideoFrameCallback === 'function'
+        && typeof dom.video?.cancelVideoFrameCallback === 'function'
+    ) {
+        if (upscalerState.videoFrameRequestId !== null) {
+            return;
+        }
+
+        upscalerState.videoFrameRequestId = dom.video.requestVideoFrameCallback(() => {
+            upscalerState.videoFrameRequestId = null;
+            renderCurrentFrame();
+            scheduleNextFrame();
+        });
+        return;
+    }
+
+    if (upscalerState.animationFrameRequestId !== null) {
+        return;
+    }
+
+    upscalerState.animationFrameRequestId = requestAnimationFrame(() => {
+        upscalerState.animationFrameRequestId = null;
         renderCurrentFrame();
-        queueNextFrame();
+        scheduleNextFrame();
     });
 }
 
 function startRenderLoop() {
-    if (upscalerState.frameRequestId !== null) {
-        return;
-    }
-
-    queueNextFrame();
+    scheduleNextFrame();
 }
 
 function bindControls() {
@@ -242,13 +219,8 @@ function bindControls() {
         applySettings();
     });
 
-    dom.upscalerAlgorithm?.addEventListener('change', (event) => {
-        upscalerState.settings.algorithm = event.target.value === 'cas' ? 'cas' : 'fsr1';
-        applySettings();
-    });
-
     dom.upscalerIntensitySlider?.addEventListener('input', (event) => {
-        setCurrentIntensity(event.target.value);
+        upscalerState.settings.intensity = normalizeIntensityValue(event.target.value);
         applySettings();
     });
 }
@@ -312,7 +284,7 @@ function createRenderer() {
         upscalerState.renderer = new UpscalerRenderer(dom.videoCanvas, dom.video);
         upscalerState.isSupported = true;
     } catch (error) {
-        disableUpscaler('WebGL indisponível. O player usará o vídeo original.');
+        disableUpscaler('WebGL2 indisponível. O player usará o vídeo original.');
         console.error('[Upscaler] Initialization failed:', error);
     }
 }

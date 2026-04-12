@@ -108,7 +108,7 @@ export const dom = {
     subtitleSessionInput: document.getElementById('subtitle-session-input'),
     subtitleUploadStatus: document.getElementById('subtitle-upload-status'),
     upscalerEnabledToggle: document.getElementById('upscaler-enabled-toggle'),
-    upscalerAlgorithm: document.getElementById('upscaler-algorithm'),
+    upscalerIntensityGroup: document.getElementById('upscaler-intensity-group'),
     upscalerIntensityLabel: document.getElementById('upscaler-intensity-label'),
     upscalerIntensitySlider: document.getElementById('upscaler-intensity-slider'),
     upscalerIntensityValue: document.getElementById('upscaler-intensity-value'),

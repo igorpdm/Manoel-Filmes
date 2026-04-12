@@ -263,25 +263,17 @@
                     <div class="settings-body">
                         <div class="setting-group">
                             <label class="toggle-label">
-                                <span>Upscaler</span>
+                                <span>Upscaling FSR1</span>
                                 <input type="checkbox" id="upscaler-enabled-toggle" class="toggle-input">
                                 <span class="toggle-switch"></span>
                             </label>
                         </div>
 
-                        <div class="setting-group">
-                            <label for="upscaler-algorithm">Algoritmo</label>
-                            <select id="upscaler-algorithm" class="custom-select">
-                                <option value="fsr1">FSR1</option>
-                                <option value="cas">FidelityFX CAS</option>
-                            </select>
-                        </div>
-
-                        <div class="setting-group">
+                        <div id="upscaler-intensity-group" class="setting-group">
                             <label><span id="upscaler-intensity-label">Sharpening</span> <span
                                     id="upscaler-intensity-value">0.5</span></label>
                             <input type="range" id="upscaler-intensity-slider" class="settings-slider" min="0"
-                                max="1" step="0.1" value="0.5">
+                                max="1.2" step="0.1" value="0.5">
                         </div>
 
                         <div class="setting-group">
