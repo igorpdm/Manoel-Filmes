@@ -311,7 +311,7 @@ export class MediaProcessor {
                     });
 
                 if (needsConversion) {
-                    command.audioCodec('aac').audioChannels(2).audioBitrate('192k');
+                    command.audioCodec('aac').outputOptions('-aac_coder fast').audioChannels(2).audioBitrate('192k');
                 } else {
                     command.audioCodec('copy');
                 }
