@@ -1,6 +1,6 @@
 export const dom = {
     video: document.getElementById('video'),
-    videoCanvas: document.getElementById('video-canvas'),
+    videoCanvas: null,
     playerContainer: document.getElementById('player-container'),
     playerOverlay: document.getElementById('player-overlay'),
     playerControls: document.getElementById('player-controls'),

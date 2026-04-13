@@ -84,16 +84,20 @@ function shouldRenderContinuously() {
     return dom.video.readyState >= dom.video.HAVE_CURRENT_DATA;
 }
 
-function updateCanvasVisibility() {
-    if (!dom.videoCanvas) {
-        return;
-    }
+function mountCanvas() {
+    if (dom.videoCanvas) return;
 
-    const shouldShow = upscalerState.isSupported
-        && upscalerState.settings.isEnabled
-        && Boolean(dom.video.currentSrc);
+    const canvas = document.createElement('canvas');
+    canvas.id = 'video-canvas';
+    canvas.className = 'video-canvas';
+    canvas.setAttribute('aria-hidden', 'true');
+    dom.video.insertAdjacentElement('afterend', canvas);
+    dom.videoCanvas = canvas;
+}
 
-    dom.videoCanvas.classList.toggle('hidden', !shouldShow);
+function unmountCanvas() {
+    dom.videoCanvas?.remove();
+    dom.videoCanvas = null;
 }
 
 function updateControls() {
@@ -126,6 +130,21 @@ function updateControls() {
 }
 
 function applySettings() {
+    if (!upscalerState.settings.isEnabled) {
+        stopRenderLoop();
+        upscalerState.renderer?.dispose();
+        upscalerState.renderer = null;
+        unmountCanvas();
+        updateControls();
+        saveSettings();
+        return;
+    }
+
+    // isEnabled é true — garante que canvas e renderer existem
+    if (!dom.videoCanvas) {
+        createRenderer();
+    }
+
     if (upscalerState.renderer) {
         upscalerState.renderer.setSettings({
             isEnabled: upscalerState.settings.isEnabled,
@@ -134,7 +153,6 @@ function applySettings() {
     }
 
     updateControls();
-    updateCanvasVisibility();
     saveSettings();
     renderCurrentFrame();
 
@@ -152,18 +170,12 @@ function disableUpscaler(message) {
     upscalerState.renderer?.dispose();
     upscalerState.renderer = null;
     updateControls();
-    updateCanvasVisibility();
+    unmountCanvas();
     console.error('[Upscaler]', message);
 }
 
 function renderCurrentFrame() {
     if (!upscalerState.isSupported || !upscalerState.settings.isEnabled || !upscalerState.renderer) {
-        return;
-    }
-
-    updateCanvasVisibility();
-
-    if (dom.videoCanvas?.classList.contains('hidden')) {
         return;
     }
 
@@ -240,7 +252,6 @@ function bindVideoEvents() {
     dom.video.addEventListener('ended', stopRenderLoop);
     dom.video.addEventListener('emptied', () => {
         stopRenderLoop();
-        updateCanvasVisibility();
     });
 }
 
@@ -275,6 +286,8 @@ function bindResizeEvents() {
 }
 
 function createRenderer() {
+    mountCanvas();
+
     if (!dom.videoCanvas || !dom.video) {
         disableUpscaler('Canvas do upscaler não encontrado.');
         return;
@@ -291,7 +304,9 @@ function createRenderer() {
 
 export function initUpscaler() {
     loadSettings();
-    createRenderer();
+    if (upscalerState.settings.isEnabled) {
+        createRenderer();
+    }
     bindControls();
     bindVideoEvents();
     bindResizeEvents();
