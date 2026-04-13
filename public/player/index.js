@@ -498,8 +498,7 @@ function bindRatingModal() {
 
         state.pendingSessionEnd = false;
 
-        showSessionCompletedScreen();
-        window.close();
+        closeWindowOrRedirect('/');
     });
 }
 

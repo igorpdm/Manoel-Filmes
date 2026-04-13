@@ -1,6 +1,6 @@
 import { existsSync, readdirSync, statSync } from "fs";
 import { rm } from "fs/promises";
-import { join, basename, resolve } from "path";
+import { join, basename, resolve, sep } from "path";
 import { logger } from "../../shared/logger";
 import { getSubtitlesDir, listRoomUploadDirs } from "./upload-paths";
 import { closeUploadHandle } from "./upload-handle-cache";
@@ -13,7 +13,7 @@ const CLEANUP_INTERVAL = 5 * 60 * 1000;
 export function isPathInsideUploadsDir(uploadsDir: string, targetPath: string): boolean {
     const uploadsRoot = resolve(uploadsDir);
     const resolvedTargetPath = resolve(targetPath);
-    return resolvedTargetPath === uploadsRoot || resolvedTargetPath.startsWith(`${uploadsRoot}/`);
+    return resolvedTargetPath === uploadsRoot || resolvedTargetPath.startsWith(uploadsRoot + sep);
 }
 
 export async function removeUpload(uploadsDir: string, chunksDir: string): Promise<void> {

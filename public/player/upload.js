@@ -344,9 +344,6 @@ export async function uploadFile(file) {
             while (chunkQueue.length > 0) {
                 const chunkIndex = chunkQueue.shift();
                 if (chunkIndex === undefined) return;
-                const remaining = chunkQueue.length + activeProgress.size;
-                const uploading = activeProgress.size + 1;
-                dom.uploadStatus.textContent = `Enviando ${uploading} chunk${uploading > 1 ? 's' : ''} (${remaining} restante${remaining !== 1 ? 's' : ''})`;
                 await uploadChunk(chunkIndex);
             }
         };

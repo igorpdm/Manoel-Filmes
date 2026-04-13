@@ -1651,27 +1651,6 @@ body {
     background-color: color-mix(in oklab, var(--color-secondary) 5%, transparent);
   }
 }
-.user-avatar {
-  margin-right: calc(var(--spacing) * 3);
-  display: flex;
-  height: calc(var(--spacing) * 9);
-  width: calc(var(--spacing) * 9);
-  align-items: center;
-  justify-content: center;
-  border-radius: calc(infinity * 1px);
-  border-style: var(--tw-border-style);
-  border-width: 2px;
-  border-color: color-mix(in oklab, var(--color-white) 10%, transparent);
-  --tw-gradient-position: to bottom right in oklab;
-  background-image: linear-gradient(var(--tw-gradient-stops));
-  --tw-gradient-from: var(--color-primary);
-  --tw-gradient-to: var(--color-primary-dark);
-  --tw-gradient-stops: var(--tw-gradient-via-stops, var(--tw-gradient-position), var(--tw-gradient-from) var(--tw-gradient-from-position), var(--tw-gradient-to) var(--tw-gradient-to-position));
-  font-size: 0.9rem;
-  --tw-font-weight: var(--font-weight-bold);
-  font-weight: var(--font-weight-bold);
-  color: var(--color-white);
-}
 .user-info {
   display: flex;
   flex: 1;
@@ -2112,7 +2091,6 @@ input[type="color"]::-webkit-color-swatch {
   transition-duration: var(--tw-duration, var(--default-transition-duration));
   --tw-duration: 200ms;
   transition-duration: 200ms;
-  margin-top: -6px;
 }
 .settings-slider::-webkit-slider-thumb:hover {
   --tw-scale-x: 125%;
@@ -2131,6 +2109,9 @@ input[type="color"]::-webkit-color-swatch {
 }
 #upscaler-intensity-slider {
   background: linear-gradient( to right, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.1) 72%, rgba(255, 220, 160, 0.22) 79%, rgba(255, 160, 140, 0.4) 83.3333%, rgba(255, 110, 110, 0.6) 91%, rgba(255, 92, 92, 0.8) 100% );
+}
+#upscaler-intensity-slider::-webkit-slider-thumb {
+  margin-top: -6px;
 }
 #upscaler-intensity-slider::-webkit-slider-runnable-track {
   height: 6px;
@@ -2532,6 +2513,92 @@ input[type="color"]::-webkit-color-swatch {
   --tw-leading: var(--leading-normal);
   line-height: var(--leading-normal);
   color: #cbd5e1;
+}
+.user-avatar {
+  margin-right: calc(var(--spacing) * 3);
+  display: flex;
+  height: calc(var(--spacing) * 9);
+  width: calc(var(--spacing) * 9);
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: calc(infinity * 1px);
+  border-style: var(--tw-border-style);
+  border-width: 2px;
+  border-color: color-mix(in oklab, var(--color-white) 10%, transparent);
+  --tw-gradient-position: to bottom right in oklab;
+  background-image: linear-gradient(var(--tw-gradient-stops));
+  --tw-gradient-from: var(--color-primary);
+  --tw-gradient-to: var(--color-primary-dark);
+  --tw-gradient-stops: var(--tw-gradient-via-stops, var(--tw-gradient-position), var(--tw-gradient-from) var(--tw-gradient-from-position), var(--tw-gradient-to) var(--tw-gradient-to-position));
+  font-size: 0.9rem;
+  --tw-font-weight: var(--font-weight-bold);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-white);
+}
+.user-avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.user-avatar-initials {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+}
+.ratings-summary {
+  margin-bottom: calc(var(--spacing) * 3) !important;
+  font-size: 0.95rem;
+  color: #cbd5e1;
+}
+.ratings-deadline {
+  margin-bottom: calc(var(--spacing) * 4);
+  font-size: 0.85rem;
+  font-weight: var(--font-weight-medium);
+  color: var(--color-secondary);
+}
+.rating-item-status {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: calc(var(--spacing) * 2);
+  text-align: right;
+}
+.rating-item-loading {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 2);
+  font-size: 0.9rem;
+  color: var(--color-text-secondary);
+}
+.rating-item-spinner {
+  height: 14px;
+  width: 14px;
+  animation: var(--animate-spin);
+  border-radius: calc(infinity * 1px);
+  border-style: solid;
+  border-width: 2px;
+  border-color: color-mix(in srgb, #fff 10%, transparent);
+  @supports (color: color-mix(in lab, red, red)) {
+    border-color: color-mix(in oklab, var(--color-white) 10%, transparent);
+  }
+  border-left-color: var(--color-primary);
+}
+.rating-item-score {
+  font-size: 1rem;
+  font-weight: var(--font-weight-bold);
+  color: var(--color-secondary);
+}
+.rating-item-timeout {
+  font-size: 0.9rem;
+  font-weight: var(--font-weight-medium);
+  color: #fca5a5;
+}
+.rating-item-empty {
+  justify-content: center;
+  color: var(--color-text-secondary);
 }
 @property --tw-rotate-x {
   syntax: "*";
