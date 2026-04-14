@@ -4,6 +4,7 @@ precision highp int;
 
 uniform sampler2D u_texture;
 uniform vec2 u_outputSize;
+uniform ivec2 u_sourceSize;
 
 out vec4 outColor;
 
@@ -102,7 +103,7 @@ void easuTap(
 }
 
 void main() {
-    ivec2 sourceSize = textureSize(u_texture, 0);
+    ivec2 sourceSize = u_sourceSize;
     vec2 sourceSizeFloat = vec2(sourceSize);
     vec2 logicalFragCoord = vec2(gl_FragCoord.x, u_outputSize.y - gl_FragCoord.y);
     vec2 sourcePosition = logicalFragCoord * sourceSizeFloat / u_outputSize - 0.5;

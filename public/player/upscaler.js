@@ -180,7 +180,6 @@ function renderCurrentFrame() {
     }
 
     try {
-        upscalerState.renderer.resize();
         upscalerState.renderer.render();
     } catch (error) {
         disableUpscaler('Falha ao renderizar o upscaler em WebGL2. O player usará o vídeo original.');

@@ -4,6 +4,7 @@ precision highp int;
 
 uniform sampler2D u_texture;
 uniform float u_intensity;
+uniform ivec2 u_sourceSize;
 
 in vec2 v_texCoord;
 
@@ -18,7 +19,7 @@ vec3 loadSourceColor(ivec2 topLeftPosition, ivec2 sourceSize) {
 }
 
 void main() {
-    ivec2 sourceSize = textureSize(u_texture, 0);
+    ivec2 sourceSize = u_sourceSize;
     vec2 logicalCoord = vec2(v_texCoord.x, 1.0 - v_texCoord.y);
     ivec2 pixelPosition = clamp(ivec2(floor(logicalCoord * vec2(sourceSize))), ivec2(0), sourceSize - ivec2(1));
 

@@ -101,6 +101,8 @@ export class UpscalerRenderer {
             alpha: false,
             antialias: false,
             premultipliedAlpha: false,
+            powerPreference: 'high-performance',
+            desynchronized: true,
         });
 
         if (!this.gl) {
@@ -120,13 +122,14 @@ export class UpscalerRenderer {
 
         this.programs = {
             copy: createProgramInfo(this.gl, copyShaderSource, ['u_texture', 'u_flipY']),
-            easu: createProgramInfo(this.gl, easuShaderSource, ['u_texture', 'u_outputSize']),
-            rcas: createProgramInfo(this.gl, rcasShaderSource, ['u_texture', 'u_intensity']),
+            easu: createProgramInfo(this.gl, easuShaderSource, ['u_texture', 'u_outputSize', 'u_sourceSize']),
+            rcas: createProgramInfo(this.gl, rcasShaderSource, ['u_texture', 'u_intensity', 'u_sourceSize']),
         };
 
         this.vao = this.createGeometry();
         this.gl.disable(this.gl.DEPTH_TEST);
         this.gl.disable(this.gl.BLEND);
+        this.gl.pixelStorei(this.gl.UNPACK_ALIGNMENT, 1);
     }
 
     createGeometry() {
@@ -244,7 +247,6 @@ export class UpscalerRenderer {
         this.ensureSourceTexture(width, height);
 
         gl.bindTexture(gl.TEXTURE_2D, this.sourceTexture);
-        gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
         gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, this.video);
     }
 
@@ -305,6 +307,7 @@ export class UpscalerRenderer {
         gl.viewport(0, 0, width, height);
         this.bindFullscreenState(programInfo, this.sourceTexture);
         gl.uniform2f(programInfo.uniforms.u_outputSize, width, height);
+        gl.uniform2i(programInfo.uniforms.u_sourceSize, this.sourceTextureSize.width, this.sourceTextureSize.height);
         this.drawFullscreen();
     }
 
@@ -326,6 +329,7 @@ export class UpscalerRenderer {
         gl.viewport(viewport.x, viewport.y, viewport.width, viewport.height);
         this.bindFullscreenState(programInfo, this.intermediateTexture);
         gl.uniform1f(programInfo.uniforms.u_intensity, this.settings.intensity);
+        gl.uniform2i(programInfo.uniforms.u_sourceSize, this.intermediateSize.width, this.intermediateSize.height);
         this.drawFullscreen();
     }
 
