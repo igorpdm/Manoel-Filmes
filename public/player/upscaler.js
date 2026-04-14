@@ -1,5 +1,6 @@
 import { dom } from './dom.js';
 import { UpscalerRenderer } from './upscaler-renderer.js';
+import { UpscalerRendererWebGPU } from './upscaler-renderer-webgpu.js';
 
 const STORAGE_KEY = 'manoel_player_upscaler_settings';
 
@@ -129,7 +130,7 @@ function updateControls() {
     }
 }
 
-function applySettings() {
+async function applySettings() {
     if (!upscalerState.settings.isEnabled) {
         stopRenderLoop();
         upscalerState.renderer?.dispose();
@@ -142,7 +143,7 @@ function applySettings() {
 
     // isEnabled é true — garante que canvas e renderer existem
     if (!dom.videoCanvas) {
-        createRenderer();
+        await createRenderer();
     }
 
     if (upscalerState.renderer) {
@@ -182,7 +183,7 @@ function renderCurrentFrame() {
     try {
         upscalerState.renderer.render();
     } catch (error) {
-        disableUpscaler('Falha ao renderizar o upscaler em WebGL2. O player usará o vídeo original.');
+        disableUpscaler('Falha ao renderizar. O player usará o vídeo original.');
         console.error('[Upscaler] Render failed:', error);
     }
 }
@@ -284,7 +285,7 @@ function bindResizeEvents() {
     window.addEventListener('resize', renderCurrentFrame);
 }
 
-function createRenderer() {
+async function createRenderer() {
     mountCanvas();
 
     if (!dom.videoCanvas || !dom.video) {
@@ -292,19 +293,31 @@ function createRenderer() {
         return;
     }
 
+    if (navigator.gpu) {
+        try {
+            upscalerState.renderer = await UpscalerRendererWebGPU.create(dom.videoCanvas, dom.video);
+            upscalerState.isSupported = true;
+            console.log('[Upscaler] Usando WebGPU.');
+            return;
+        } catch (error) {
+            console.warn('[Upscaler] WebGPU falhou, tentando WebGL2:', error);
+        }
+    }
+
     try {
         upscalerState.renderer = new UpscalerRenderer(dom.videoCanvas, dom.video);
         upscalerState.isSupported = true;
+        console.log('[Upscaler] Usando WebGL2.');
     } catch (error) {
         disableUpscaler('WebGL2 indisponível. O player usará o vídeo original.');
         console.error('[Upscaler] Initialization failed:', error);
     }
 }
 
-export function initUpscaler() {
+export async function initUpscaler() {
     loadSettings();
     if (upscalerState.settings.isEnabled) {
-        createRenderer();
+        await createRenderer();
     }
     bindControls();
     bindVideoEvents();

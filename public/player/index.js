@@ -638,7 +638,7 @@ async function init() {
 
     initSidebar();
     initSubtitles();
-    initUpscaler();
+    await initUpscaler();
     bindUploadEvents();
     bindPlayerEvents();
     bindControls();
