@@ -13,13 +13,16 @@ import {
   buildListComponents,
   buildWatchlistComponents,
   buildSessionComponents,
+  buildChangelogComponents,
 } from "../ui/components";
 import {
   buildMovieVoteEmbed,
   buildListEmbed,
   buildWatchlistEmbed,
   buildSessionEmbed,
+  buildChangelogEmbed,
 } from "../ui/embeds";
+import { CHANGELOG_ENTRIES } from "../data/changelog";
 import { toMovieId } from "../utils";
 import {
   votingCache,
@@ -344,6 +347,19 @@ export const handleButton = async (interaction: ButtonInteraction) => {
     const components = buildWatchlistComponents(nextPage, nextTotal);
     cached.page = nextPage;
 
+    await interaction.update({ embeds: [embed], components });
+    return;
+  }
+
+  if (customId.startsWith("changelog_nav:")) {
+    const pageIndex = parseInt(customId.split(":")[1], 10);
+    if (isNaN(pageIndex) || pageIndex < 0 || pageIndex >= CHANGELOG_ENTRIES.length) {
+      await interaction.deferUpdate();
+      return;
+    }
+    const entry = CHANGELOG_ENTRIES[pageIndex];
+    const embed = buildChangelogEmbed(entry, pageIndex);
+    const components = buildChangelogComponents(pageIndex, CHANGELOG_ENTRIES.length);
     await interaction.update({ embeds: [embed], components });
   }
 };

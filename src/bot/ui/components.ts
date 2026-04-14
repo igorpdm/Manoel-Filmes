@@ -215,6 +215,25 @@ export const buildRecommendationModal = () => {
     );
 };
 
+export const buildChangelogComponents = (
+  pageIndex: number,
+  total: number
+): ActionRowBuilder<ButtonBuilder>[] => {
+  const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`changelog_nav:${pageIndex - 1}`)
+      .setLabel("◀ Versão Anterior")
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(pageIndex === 0),
+    new ButtonBuilder()
+      .setCustomId(`changelog_nav:${pageIndex + 1}`)
+      .setLabel("Próxima Versão ▶")
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(pageIndex === total - 1)
+  );
+  return [row];
+};
+
 export const buildConfirmRow = (
   confirmId: string,
   cancelId: string,

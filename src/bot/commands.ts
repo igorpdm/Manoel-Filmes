@@ -48,6 +48,9 @@ export const registerCommands = async (client: any) => {
     new SlashCommandBuilder()
       .setName("sessao")
       .setDescription("Criar uma sessão de cinema para assistir junto"),
+    new SlashCommandBuilder()
+      .setName("changelog")
+      .setDescription("Ver o histórico de atualizações do bot"),
   ];
 
   await client.application.commands.set(commands.map((cmd) => cmd.toJSON()));

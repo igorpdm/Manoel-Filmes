@@ -3,6 +3,7 @@ import db from "../../database";
 import { formatWatchDate } from "../utils";
 import { searchMovieTmdb } from "../services/tmdb";
 import { searchTrailerYoutube } from "../services/youtube";
+import { type ChangelogEntry, CHANGELOG_ENTRIES } from "../data/changelog";
 
 export const buildMovieVoteEmbed = async (
   movieKey: string,
@@ -307,6 +308,25 @@ export const buildMovieDetailEmbed = (filme: any) => {
       const votos = filme.avaliacoes.map((av: any) => `👤 **${av.user_name}**: ${av.score}/10`).join("\n");
       embed.addFields({ name: "📝 Avaliações Individuais", value: votos || "Sem detalhes", inline: false });
     }
+  }
+
+  return embed;
+};
+
+export const buildChangelogEmbed = (entry: ChangelogEntry, pageIndex: number): EmbedBuilder => {
+  const total = CHANGELOG_ENTRIES.length;
+  const embed = new EmbedBuilder()
+    .setTitle(`📋 ${entry.version} — ${entry.title}`)
+    .setDescription(`📅 Lançado em ${entry.date}`)
+    .setColor(0x5865f2)
+    .setFooter({ text: `${entry.version} • Versão ${pageIndex + 1} de ${total}` });
+
+  for (const change of entry.changes) {
+    embed.addFields({
+      name: change.category,
+      value: change.items.map((item) => `• ${item}`).join("\n"),
+      inline: false,
+    });
   }
 
   return embed;

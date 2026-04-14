@@ -19,12 +19,15 @@ import {
   buildRecommendationSelectComponents,
   buildConfirmRow,
   buildRecommendationModal,
+  buildChangelogComponents,
 } from "../ui/components";
 import {
   buildListEmbed,
   buildWatchlistEmbed,
   buildRecommendationsListEmbed,
+  buildChangelogEmbed,
 } from "../ui/embeds";
+import { CHANGELOG_ENTRIES } from "../data/changelog";
 import {
   listCache,
   watchlistCache,
@@ -371,6 +374,14 @@ async function handleRecomendar(interaction: ChatInputCommandInteraction): Promi
   await interaction.showModal(buildRecommendationModal());
 }
 
+async function handleChangelog(interaction: ChatInputCommandInteraction): Promise<void> {
+  const pageIndex = 0;
+  const entry = CHANGELOG_ENTRIES[pageIndex];
+  const embed = buildChangelogEmbed(entry, pageIndex);
+  const components = buildChangelogComponents(pageIndex, CHANGELOG_ENTRIES.length);
+  await interaction.reply({ embeds: [embed], components });
+}
+
 const handlers: Record<string, CommandHandler> = {
   help: handleHelp,
   sessao: handleSessao,
@@ -380,6 +391,7 @@ const handlers: Record<string, CommandHandler> = {
   minhasavaliacoes: handleMinhasAvaliacoes,
   remover: handleRemover,
   recomendar: handleRecomendar,
+  changelog: handleChangelog,
 };
 
 export const handleChatInputCommand = async (interaction: ChatInputCommandInteraction): Promise<void> => {
