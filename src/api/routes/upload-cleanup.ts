@@ -65,6 +65,26 @@ async function cleanupUploads(uploadsDir: string): Promise<void> {
 }
 
 /**
+ * Remove todos os arquivos e subpastas da pasta de uploads.
+ * Chamado na inicialização do servidor para garantir armazenamento limpo.
+ * @param uploadsDir Diretório base de uploads.
+ */
+export async function clearAllUploads(uploadsDir: string): Promise<void> {
+    if (!existsSync(uploadsDir)) return;
+
+    const entries = readdirSync(uploadsDir, { withFileTypes: true });
+    if (entries.length === 0) return;
+
+    await Promise.all(
+        entries.map(entry =>
+            rm(join(uploadsDir, entry.name), { recursive: true, force: true })
+        )
+    );
+
+    logger.info("UploadCleanup", `Pasta de uploads limpa na inicialização (${entries.length} item(ns) removido(s))`);
+}
+
+/**
  * Inicia limpeza periódica de uploads temporários expirados.
  * @param uploadsDir Diretório base de uploads.
  */

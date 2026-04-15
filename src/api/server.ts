@@ -11,6 +11,7 @@ import { createTmdbRouter } from "./routes/tmdb";
 import { createDiscordSessionRouter } from "./routes/discord-session";
 import { createOAuthRouter } from "./routes/oauth";
 import { createUploadRouter, startUploadCleanup } from "./routes/upload";
+import { clearAllUploads } from "./routes/upload-cleanup";
 import { createRoomRouter, getSessionStatusData } from "./routes/room";
 import { createVideoRouter } from "./routes/video";
 import { createStaticRouter } from "./routes/static";
@@ -47,6 +48,7 @@ if (!existsSync(UPLOADS_DIR)) {
     mkdirSync(UPLOADS_DIR, { recursive: true });
 }
 
+await clearAllUploads(UPLOADS_DIR);
 startUploadCleanup(UPLOADS_DIR);
 
 const app = express();
