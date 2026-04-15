@@ -87,6 +87,7 @@ export const state = {
     nextEpisode: null,
     episodeHistory: [],
     isEpisodeTransition: false,
+    isUploadingLocally: false,
 };
 
 /**

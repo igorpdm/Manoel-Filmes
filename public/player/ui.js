@@ -252,6 +252,8 @@ export function showPlayer() {
 }
 
 export function showUploadProgress(progress = 0) {
+    if (state.isHost && !state.isUploadingLocally) return;
+
     state.roomStage = 'uploading';
 
     if (!state.isHost) {

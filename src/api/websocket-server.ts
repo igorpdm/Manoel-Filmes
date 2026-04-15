@@ -86,7 +86,11 @@ function sendInitialState(ws: ExtendedWebSocket, roomId: string, isHost: boolean
     ws.send(JSON.stringify({ type: "sync", currentTime, isPlaying: room.state.isPlaying, isHost }));
 
     if (room.state.isUploading) {
-        ws.send(JSON.stringify({ type: "upload-progress", progress: room.state.uploadProgress }));
+        if (isHost) {
+            ws.send(JSON.stringify({ type: "upload-reconnect", progress: room.state.uploadProgress }));
+        } else {
+            ws.send(JSON.stringify({ type: "upload-progress", progress: room.state.uploadProgress }));
+        }
     }
 
     if (room.state.isAwaitingAudioSelection) {
