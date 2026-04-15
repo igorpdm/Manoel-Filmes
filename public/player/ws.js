@@ -17,6 +17,7 @@ import {
     populateMovieModal
 } from './ui.js';
 import { fetchAvailableSubtitles, updateSettingsPanel } from './subtitles.js';
+import { checkPendingResume, isUploadActive } from './upload.js';
 
 function log(...args) {
     if (location.hostname === 'localhost') {
@@ -239,7 +240,11 @@ function handleMessage(data) {
                 dom.waitingOverlay.querySelector('p').textContent = `O host iniciou o envio: ${filename}`;
             }
             break;
+        case 'upload-reconnect':
+            checkPendingResume();
+            break;
         case 'upload-progress':
+            if (state.isHost && !isUploadActive()) break;
             showUploadProgress(data.progress || 0);
             break;
         case 'audio-track-selection-required':

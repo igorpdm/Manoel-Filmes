@@ -157,7 +157,7 @@ export function createUploadRouter(deps: UploadDeps): Router {
         }
 
         deps.roomManager.updateState(roomId, { isUploading: false, uploadProgress: 0 });
-        deps.roomManager.broadcastAll(roomId, { type: "upload-progress", progress: 0 });
+        deps.roomManager.broadcastAll(roomId, { type: "pending-upload-cancelled" });
 
         res.json({ success: true });
     });
@@ -330,14 +330,19 @@ export function createUploadRouter(deps: UploadDeps): Router {
                 bytesWritten += chunk.length;
             }
         } catch (e) {
-            logger.error("UploadRoute", `Falha ao escrever chunk ${chunkIndex} do upload ${uploadId}`, e);
+            const isAbort = (e as NodeJS.ErrnoException)?.message === 'aborted' || (e as NodeJS.ErrnoException)?.code === 'ECONNRESET';
+            if (!isAbort) {
+                logger.error("UploadRoute", `Falha ao escrever chunk ${chunkIndex} do upload ${uploadId}`, e);
+            }
             const remaining = (activeWriteCounts.get(uploadId) || 1) - 1;
             if (remaining <= 0) {
                 activeWriteCounts.delete(uploadId);
             } else {
                 activeWriteCounts.set(uploadId, remaining);
             }
-            res.status(500).json({ error: "Erro ao escrever dados" });
+            if (!res.headersSent) {
+                res.status(500).json({ error: "Erro ao escrever dados" });
+            }
             return;
         }
 

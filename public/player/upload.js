@@ -3,11 +3,9 @@ import { buildRoomHeaders, state, constants } from './state.js';
 import { formatBytes, formatEta } from './utils.js';
 import { showPlayer, showUploadProgress, showAudioTrackSelection, showProcessingProgress, updateUploadProgress, updateHostUI } from './ui.js';
 
-function log(...args) {
-    if (location.hostname === 'localhost') {
-        console.log('[ManoelPlayer]', ...args);
-    }
-}
+let _cancelRequested = false;
+let _currentUploadId = null;
+const _activeXhrs = new Set();
 
 function buildAuthHeaders() {
     return buildRoomHeaders();
@@ -81,6 +79,51 @@ async function abortUpload(uploadId) {
     } catch {
         return;
     }
+}
+
+async function cancelUpload() {
+    _cancelRequested = true;
+    for (const xhr of _activeXhrs) xhr.abort();
+    _activeXhrs.clear();
+    if (_currentUploadId) await abortUpload(_currentUploadId);
+    clearStoredUpload();
+}
+
+export function isUploadActive() {
+    return _currentUploadId !== null;
+}
+
+export function clearResumeHint() {
+    dom.uploadResumeHint?.classList.add('hidden');
+}
+
+export async function checkPendingResume() {
+    if (!state.isHost) return;
+
+    const raw = localStorage.getItem(getUploadStorageKey());
+    if (!raw) return;
+
+    let stored;
+    try {
+        stored = JSON.parse(raw);
+    } catch {
+        clearStoredUpload();
+        return;
+    }
+
+    const status = await fetchUploadStatus(stored.uploadId).catch(() => null);
+    if (!status) {
+        clearStoredUpload();
+        return;
+    }
+
+    const received = status.existingChunks?.length ?? 0;
+    const total = stored.totalChunks ?? status.totalChunks ?? 0;
+    const percent = total > 0 ? Math.round((received / total) * 100) : 0;
+
+    if (dom.uploadResumeFilename) dom.uploadResumeFilename.textContent = stored.name;
+    if (dom.uploadResumeProgress) dom.uploadResumeProgress.textContent = `${percent}% concluído — ${received}/${total} partes enviadas`;
+    dom.uploadResumeHint?.classList.remove('hidden');
 }
 
 async function confirmAudioTrackSelection() {
@@ -195,6 +238,11 @@ async function cancelPendingFile() {
 export async function uploadFile(file) {
     if (!state.isHost) return;
 
+    _cancelRequested = false;
+    _currentUploadId = null;
+    state.isUploadingLocally = true;
+    clearResumeHint();
+
     showUploadProgress(0);
     dom.uploadStatus.textContent = `Preparando: ${file.name}`;
 
@@ -236,6 +284,8 @@ export async function uploadFile(file) {
             existingChunks = [];
             storeUpload(uploadId, file, totalChunks);
         }
+
+        _currentUploadId = uploadId;
 
         const existingSet = new Set(existingChunks);
         let completedBytes = 0;
@@ -297,10 +347,12 @@ export async function uploadFile(file) {
             let chunkSuccess = false;
 
             while (attempt < maxRetries && !chunkSuccess) {
+                if (_cancelRequested) throw new Error('cancelled');
                 attempt++;
                 try {
                     await new Promise((resolve, reject) => {
                         const xhr = new XMLHttpRequest();
+                        _activeXhrs.add(xhr);
                         xhr.timeout = constants.UPLOAD_TIMEOUT;
                         xhr.open('POST', `/api/upload/chunk/${state.roomId}/${uploadId}/${i}`);
 
@@ -317,14 +369,16 @@ export async function uploadFile(file) {
                         };
 
                         xhr.onload = () => {
+                            _activeXhrs.delete(xhr);
                             if (xhr.status === 200) {
                                 resolve();
                             } else {
                                 reject(new Error(`Erro no upload status ${xhr.status}`));
                             }
                         };
-                        xhr.onerror = () => reject(new Error('Erro de rede'));
-                        xhr.ontimeout = () => reject(new Error('Timeout'));
+                        xhr.onerror = () => { _activeXhrs.delete(xhr); reject(new Error('Erro de rede')); };
+                        xhr.ontimeout = () => { _activeXhrs.delete(xhr); reject(new Error('Timeout')); };
+                        xhr.onabort = () => { _activeXhrs.delete(xhr); reject(new Error('cancelled')); };
                         xhr.send(chunk);
                     });
                     chunkSuccess = true;
@@ -334,6 +388,7 @@ export async function uploadFile(file) {
                     updateGlobalProgress(true);
                 } catch (err) {
                     activeProgress.delete(i);
+                    if (err?.message === 'cancelled') throw err;
                     if (attempt >= maxRetries) throw err;
                     await new Promise(r => setTimeout(r, 300 * attempt));
                 }
@@ -342,6 +397,7 @@ export async function uploadFile(file) {
 
         const worker = async () => {
             while (chunkQueue.length > 0) {
+                if (_cancelRequested) return;
                 const chunkIndex = chunkQueue.shift();
                 if (chunkIndex === undefined) return;
                 await uploadChunk(chunkIndex);
@@ -364,6 +420,8 @@ export async function uploadFile(file) {
             window.removeEventListener('beforeunload', onUnload);
         }
 
+        if (_cancelRequested) throw new Error('cancelled');
+
         dom.uploadStatus.textContent = 'Finalizando...';
         updateUploadProgress(100);
 
@@ -383,9 +441,17 @@ export async function uploadFile(file) {
         applyProcessingState(completeData, 'Processando vídeo... (Isso pode levar alguns minutos)');
 
     } catch (err) {
-        log('Erro:', err);
-        // Evita loop de retomada quando a sessão já foi encerrada.
         const message = err?.message || '';
+
+        if (_cancelRequested) {
+            _cancelRequested = false;
+            _currentUploadId = null;
+            state.roomStage = 'idle';
+            updateHostUI();
+            return;
+        }
+
+        // Evita loop de retomada quando a sessão já foi encerrada.
         if (message.includes('403')) {
             clearStoredUpload();
             dom.uploadStatus.textContent = 'Upload cancelado (Sessão encerrada)';
@@ -400,6 +466,9 @@ export async function uploadFile(file) {
         setTimeout(() => {
             window.location.reload();
         }, 2000);
+    } finally {
+        _currentUploadId = null;
+        state.isUploadingLocally = false;
     }
 }
 
@@ -459,12 +528,33 @@ export function bindUploadEvents() {
     dom.btnConfirmAudioTrack?.addEventListener('click', confirmAudioTrackSelection);
     dom.btnCancelPendingFile?.addEventListener('click', cancelPendingFile);
 
+    dom.btnCancelUpload?.addEventListener('click', async () => {
+        if (dom.btnCancelUpload) {
+            dom.btnCancelUpload.disabled = true;
+            dom.btnCancelUpload.textContent = 'Cancelando...';
+        }
+        await cancelUpload();
+        // Forçar reset após o servidor confirmar o abort — o broadcast WS
+        // "upload-progress: 0" já foi processado antes da resposta HTTP chegar,
+        // então este reset tem a última palavra sobre o estado da UI.
+        state.roomStage = 'idle';
+        updateHostUI();
+        if (dom.btnCancelUpload) {
+            dom.btnCancelUpload.disabled = false;
+            dom.btnCancelUpload.textContent = 'Cancelar Upload';
+        }
+    });
+
     dom.btnSelectFile?.addEventListener('click', () => dom.fileInput.click());
     dom.fileInput?.addEventListener('change', async (e) => {
         const file = e.target.files[0];
         if (file) {
-            await uploadFile(file);
-            await uploadPendingSubtitles();
+            try {
+                await uploadFile(file);
+                await uploadPendingSubtitles();
+            } finally {
+                dom.fileInput.value = '';
+            }
         }
     });
 
