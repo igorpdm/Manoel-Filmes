@@ -1,6 +1,6 @@
 {
   "name": "manoel-filmes",
-  "version": "1.0.0",
+  "version": "1.7.0",
   "description": "Manoel Filmes - Player sincronizado com Bot Discord integrado",
   "type": "module",
   "scripts": {

@@ -12,6 +12,28 @@ export interface ChangelogEntry {
 
 export const CHANGELOG_ENTRIES: ChangelogEntry[] = [
   {
+    version: "v1.7.0",
+    title: "Cancelamento e Retomada de Upload",
+    date: "15/04/2026",
+    changes: [
+      {
+        category: "🆕 Novidades",
+        items: [
+          "Botão \"Cancelar Upload\" disponível durante o envio — agora é possível interromper um upload em andamento",
+          "Retomada de upload — arquivos parcialmente enviados podem ser continuados ao atualizar a página",
+        ],
+      },
+      {
+        category: "🐛 Correções",
+        items: [
+          "Overlay de upload não fica mais congelado quando o host recarrega a página durante um envio",
+          "Uploads residuais de sessões anteriores são removidos automaticamente ao iniciar o servidor",
+          "Corrigido problema que impedia o reupload de um mesmo arquivo após cancelamento",
+        ],
+      },
+    ],
+  },
+  {
     version: "v1.6.0",
     title: "Performance e WebGPU",
     date: "14/04/2026",
