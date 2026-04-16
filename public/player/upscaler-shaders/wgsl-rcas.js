@@ -1,12 +1,3 @@
-// RCAS (Robust Contrast Adaptive Sharpening) — parte do FidelityFX Super Resolution 1.
-// Tradução do shader GLSL ES 3.0 original para WGSL.
-//
-// Diferenças críticas em relação ao GLSL:
-// - O GLSL original invertia Y em loadSourceColor: sourceSize.y - 1 - y
-//   Isso existia porque texturas no WebGL têm (0,0) na parte inferior.
-//   No WebGPU, texturas têm (0,0) na parte SUPERIOR — igual ao @builtin(position).
-//   Por isso NÃO há flip de Y aqui.
-// - v_texCoord e logicalCoord removidos: pixel_position derivado diretamente de frag_coord.xy.
 export const wgslRcasShaderSource = `
 struct VertexOutput {
     @builtin(position) position: vec4f,
@@ -35,17 +26,17 @@ struct RcasUniforms {
 @group(0) @binding(1) var<uniform> uniforms: RcasUniforms;
 
 fn load_source_color(pos: vec2i, source_size: vec2i) -> vec3f {
-    // WebGPU: (0,0) é o canto superior esquerdo tanto em texturas como em frag_coord.
-    // Sem flip de Y (o GLSL original invertia por convenção OpenGL/WebGL).
     let clamped = clamp(pos, vec2i(0), source_size - vec2i(1));
     return textureLoad(source_texture, vec2u(clamped), 0).rgb;
 }
 
 @fragment
-fn fs_main(@builtin(position) frag_coord: vec4f) -> @location(0) vec4f {
+fn fs_main(input: VertexOutput) -> @location(0) vec4f {
     let source_size = vec2i(uniforms.source_size);
-    // frag_coord.xy já está em pixel coords top-left — basta converter para inteiro.
-    let pixel_position = clamp(vec2i(frag_coord.xy), vec2i(0), source_size - vec2i(1));
+    // UV (0→1) derivada do vertex shader — independente do offset do viewport no canvas.
+    // Usar frag_coord.xy aqui seria errado: quando há letterboxing, frag_coord inclui o
+    // offset do viewport (ex: y=50), fazendo o shader amostrar posições erradas da textura.
+    let pixel_position = clamp(vec2i(floor(input.uv * vec2f(source_size))), vec2i(0), source_size - vec2i(1));
 
     let b = load_source_color(pixel_position + vec2i( 0, -1), source_size);
     let d = load_source_color(pixel_position + vec2i(-1,  0), source_size);

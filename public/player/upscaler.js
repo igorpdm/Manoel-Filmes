@@ -316,9 +316,7 @@ async function createRenderer() {
 
 export async function initUpscaler() {
     loadSettings();
-    if (upscalerState.settings.isEnabled) {
-        await createRenderer();
-    }
+    await createRenderer();
     bindControls();
     bindVideoEvents();
     bindResizeEvents();
