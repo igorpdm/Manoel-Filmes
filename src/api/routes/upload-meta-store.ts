@@ -1,4 +1,4 @@
-import { existsSync } from "fs";
+import { existsSync, readFileSync } from "fs";
 import { promises as fs } from "fs";
 import { join } from "path";
 import type { UploadMeta } from "./upload-types";
@@ -31,7 +31,6 @@ export function readMeta(chunksDir: string): UploadMeta | null {
     const metaPath = getMetaPath(chunksDir);
     if (!existsSync(metaPath)) return null;
     try {
-        const { readFileSync } = require("fs");
         const raw = readFileSync(metaPath, "utf8");
         return JSON.parse(raw) as UploadMeta;
     } catch {
