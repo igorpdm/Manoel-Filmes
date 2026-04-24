@@ -74,20 +74,56 @@ export class UpscalerRendererWebGPU {
 
         const device = await adapter.requestDevice();
 
-        // Captura erros não tratados do device para debug.
         device.addEventListener('uncapturederror', (event) => {
             console.error('[Upscaler WebGPU] Uncaptured error:', event.error.message);
         });
 
-        const context = canvas.getContext('webgpu');
-        if (!context) {
-            throw new Error('Falha ao obter contexto WebGPU do canvas.');
+        device.pushErrorScope('validation');
+        device.createBindGroupLayout({
+            label: 'external-texture-probe-bgl',
+            entries: [
+                { binding: 0, visibility: GPUShaderStage.FRAGMENT, externalTexture: {} },
+            ],
+        });
+
+        const externalTextureError = await device.popErrorScope();
+
+        if (externalTextureError) {
+            device.destroy();
+            throw new Error(`WebGPU sem suporte a texturas externas de vídeo: ${externalTextureError.message}`);
         }
 
         const preferredFormat = navigator.gpu.getPreferredCanvasFormat();
-        context.configure({ device, format: preferredFormat, alphaMode: 'opaque' });
 
-        return new UpscalerRendererWebGPU(canvas, video, device, context, preferredFormat);
+        device.pushErrorScope('validation');
+
+        let renderer;
+
+        try {
+            renderer = new UpscalerRendererWebGPU(canvas, video, device, null, preferredFormat);
+        } catch (error) {
+            await device.popErrorScope();
+            device.destroy();
+            throw error;
+        }
+
+        const validationError = await device.popErrorScope();
+
+        if (validationError) {
+            renderer.dispose();
+            throw new Error(`WebGPU incompatível com o pipeline do upscaler: ${validationError.message}`);
+        }
+
+        const context = canvas.getContext('webgpu');
+        if (!context) {
+            renderer.dispose();
+            throw new Error('Falha ao obter contexto WebGPU do canvas.');
+        }
+
+        context.configure({ device, format: preferredFormat, alphaMode: 'opaque' });
+        renderer.context = context;
+
+        return renderer;
     }
 
     _setupPipelines() {
@@ -525,7 +561,7 @@ export class UpscalerRendererWebGPU {
         this.intermediateTexture?.destroy();
         this.easuUniformBuffer?.destroy();
         this.rcasUniformBuffer?.destroy();
-        this.context.unconfigure();
+        this.context?.unconfigure();
         this.device.destroy();
     }
 }

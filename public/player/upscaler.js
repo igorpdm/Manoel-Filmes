@@ -320,5 +320,8 @@ export async function initUpscaler() {
     bindControls();
     bindVideoEvents();
     bindResizeEvents();
-    applySettings();
+
+    if (upscalerState.renderer) {
+        applySettings();
+    }
 }
