@@ -34,7 +34,7 @@ async function fetchRoomInfo() {
         });
         if (res.ok) {
             const data = await res.json();
-            dom.roomTitleEl.textContent = data.title;
+            dom.roomTitleEl.textContent = data.movieName;
 
             if (data.movieInfo) {
                 state.currentMovieInfo = data.movieInfo;
