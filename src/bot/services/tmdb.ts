@@ -1,22 +1,41 @@
-import axios from "axios";
 import { TMDB_API_KEY, TMDB_BASE_URL, TMDB_IMAGE_BASE } from "../../config";
 import { logger } from "../../shared/logger";
 
-const tmdbApi = axios.create({
-  timeout: 10000,
-});
+const TMDB_TIMEOUT_MS = 10000;
+
+async function fetchTmdbJson(path: string, params: Record<string, string | number | undefined>) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), TMDB_TIMEOUT_MS);
+  const searchParams = new URLSearchParams();
+
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined) searchParams.set(key, String(value));
+  }
+
+  try {
+    const response = await fetch(`${TMDB_BASE_URL}${path}?${searchParams.toString()}`, {
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      throw new Error(`TMDB respondeu ${response.status}`);
+    }
+
+    return response.json() as Promise<any>;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
 
 export const searchMovieTmdb = async (title: string) => {
   try {
-    const searchResponse = await tmdbApi.get(`${TMDB_BASE_URL}/search/multi`, {
-      params: {
-        api_key: TMDB_API_KEY,
-        query: title,
-        language: "pt-BR",
-      },
+    const searchData = await fetchTmdbJson("/search/multi", {
+      api_key: TMDB_API_KEY,
+      query: title,
+      language: "pt-BR",
     });
 
-    const results = searchResponse.data?.results || [];
+    const results = searchData?.results || [];
     const filtered = results.filter(
       (r: any) => r.media_type === "movie" || r.media_type === "tv"
     );
@@ -29,14 +48,10 @@ export const searchMovieTmdb = async (title: string) => {
     const isMovie = item.media_type === "movie";
     const endpoint = isMovie ? "movie" : "tv";
 
-    const detailResponse = await tmdbApi.get(`${TMDB_BASE_URL}/${endpoint}/${item.id}`, {
-      params: {
-        api_key: TMDB_API_KEY,
-        language: "pt-BR",
-      },
+    const details = await fetchTmdbJson(`/${endpoint}/${item.id}`, {
+      api_key: TMDB_API_KEY,
+      language: "pt-BR",
     });
-
-    const details = detailResponse.data;
     const genres = details?.genres?.map((g: { name: string }) => g.name) || [];
     const posterPath = item.poster_path || details.poster_path;
 
@@ -46,17 +61,10 @@ export const searchMovieTmdb = async (title: string) => {
         .filter((s: any) => s.season_number > 0)
         .map(async (season: any) => {
           try {
-            const seasonRes = await tmdbApi.get(
-              `${TMDB_BASE_URL}/tv/${item.id}/season/${season.season_number}`,
-              {
-                params: {
-                  api_key: TMDB_API_KEY,
-                  language: "pt-BR",
-                },
-              }
-            );
-
-            const seasonData = seasonRes.data;
+            const seasonData = await fetchTmdbJson(`/tv/${item.id}/season/${season.season_number}`, {
+              api_key: TMDB_API_KEY,
+              language: "pt-BR",
+            });
             return {
               id: seasonData.id,
               seasonNumber: seasonData.season_number,

@@ -1,6 +1,5 @@
 import { TextChannel } from "discord.js";
 import type { Client } from "discord.js";
-import WebSocket from "ws";
 import { activeWatchSession, setActiveWatchSession, ActiveWatchSession } from "../state";
 import * as playerApi from "./player-api";
 import { buildSessionEmbed } from "../ui/embeds";
@@ -59,6 +58,13 @@ const monitorState = {
     episodeTransitionMovieName: null as string | null,
     episodeTransitionEpisode: null as SelectedEpisode | null,
 };
+
+function parseWebSocketMessageData(data: unknown): string {
+    if (typeof data === "string") return data;
+    if (data instanceof ArrayBuffer) return Buffer.from(data).toString("utf8");
+    if (ArrayBuffer.isView(data)) return Buffer.from(data.buffer, data.byteOffset, data.byteLength).toString("utf8");
+    return String(data);
+}
 
 export const startSessionMonitor = (client: Client) => {
     if (monitorState.checkInterval) clearInterval(monitorState.checkInterval);
@@ -128,7 +134,7 @@ function connectToSession(client: Client, session: ActiveWatchSession) {
         headers: {
             "x-room-token": session.hostToken,
         },
-    });
+    } as never);
 
     monitorState.socket.onopen = () => {
         logger.info("SessionMonitor", `WS aberto: room=${session.roomId}`);
@@ -146,7 +152,7 @@ function connectToSession(client: Client, session: ActiveWatchSession) {
 
         let data: WsMessage | null = null;
         try {
-            const rawData = typeof event.data === "string" ? event.data : event.data.toString();
+            const rawData = parseWebSocketMessageData(event.data);
             data = JSON.parse(rawData) as WsMessage;
         } catch {
             return;
