@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router } from "../http/context";
 import { join } from "path";
 import { roomManager } from "../../core/room-manager";
 import { PUBLIC_DIR } from "../../config";

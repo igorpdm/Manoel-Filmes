@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router } from "../http/context";
 import { logger } from "../../shared/logger";
 
 interface TmdbDeps {

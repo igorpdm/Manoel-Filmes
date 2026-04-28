@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router } from "../http/context";
 import { cleanupRoomUploads } from "./upload";
 import type { RoomManager } from "../../core/room-manager";
 import type {

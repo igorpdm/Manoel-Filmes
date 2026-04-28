@@ -1,5 +1,5 @@
-import type { Response } from "express";
 import { logger } from "../../shared/logger";
+import type { Response } from "./context";
 import { isHttpError } from "./http-error";
 
 export function sendRouteError(res: Response, error: unknown, context: string): void {

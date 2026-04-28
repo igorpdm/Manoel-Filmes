@@ -1,5 +1,5 @@
-import type { Request } from "express";
 import type { UploadDeps } from "./upload-types";
+import type { Request } from "../http/context";
 import { getRoomTokenFromRequest } from "../http/room-access";
 
 export function getAuthFromRequest(request: Request, body?: unknown) {

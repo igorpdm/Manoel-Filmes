@@ -1,9 +1,8 @@
-import { Router } from "express";
 import { existsSync, mkdirSync } from "fs";
 import { rm } from "fs/promises";
 import { promises as fs } from "fs";
 import { join, basename, resolve } from "path";
-import type { Request, Response } from "express";
+import { Router, type Request, type Response } from "../http/context";
 import { logger } from "../../shared/logger";
 import type { UploadDeps, UploadMeta } from "./upload-types";
 import { getAuthFromRequest, ensureUploadAuthorized } from "./upload-auth";

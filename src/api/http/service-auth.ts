@@ -1,5 +1,5 @@
-import type { Request } from "express";
 import { PLAYER_API_SHARED_SECRET } from "../../config";
+import type { Request } from "./context";
 import { InfraHttpError, UnauthorizedHttpError } from "./http-error";
 
 function getServiceSecret(request: Request): string {

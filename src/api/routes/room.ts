@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router } from "../http/context";
 import { roomManager } from "../../core/room-manager";
 import { buildSessionStatusData } from "../services/session-status";
 import { sendRouteError } from "../http/route-error";

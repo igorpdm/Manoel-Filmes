@@ -1,20 +1,12 @@
-import { Request, Response, NextFunction } from "express";
 import { createHmac, randomBytes, timingSafeEqual } from "crypto";
 import type { OAuthSession } from "../../shared/types";
 import { SESSION_SECRET, IS_PROD } from "../../config";
+import type { NextFunction, Request, Response } from "./context";
 
 const SESSION_COOKIE_NAME = "manoel_session";
 const SESSION_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000; // 7 dias
 
 export { SESSION_COOKIE_NAME };
-
-declare global {
-    namespace Express {
-        interface Request {
-            oauthSession?: OAuthSession;
-        }
-    }
-}
 
 function getSecretKey(): Buffer {
     if (!SESSION_SECRET || SESSION_SECRET.length < 32) {
@@ -132,6 +124,11 @@ export function clearSessionCookie(res: Response): void {
  * Popula req.oauthSession se válido.
  */
 export function sessionMiddleware(req: Request, _res: Response, next: NextFunction): void {
+    attachOAuthSession(req);
+    next();
+}
+
+export function attachOAuthSession(req: Request): void {
     req.oauthSession = undefined;
 
     const cookie = req.cookies?.[SESSION_COOKIE_NAME];
@@ -141,8 +138,6 @@ export function sessionMiddleware(req: Request, _res: Response, next: NextFuncti
             req.oauthSession = session;
         }
     }
-
-    next();
 }
 
 /**

@@ -1,4 +1,4 @@
-import { Router, type Response } from "express";
+import { Router, type Response } from "../http/context";
 import { logger } from "../../shared/logger";
 import { sendRouteError } from "../http/route-error";
 import { createRateLimit } from "../http/rate-limit";

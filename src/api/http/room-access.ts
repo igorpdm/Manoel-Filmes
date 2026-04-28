@@ -1,6 +1,6 @@
-import type { Request } from "express";
 import type { DiscordUser, Room } from "../../shared/types";
 import type { RoomManager } from "../../core/room-manager";
+import type { Request } from "./context";
 import {
   ForbiddenHttpError,
   NotFoundHttpError,
