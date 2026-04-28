@@ -30,7 +30,6 @@ import {
     PLAYER_API_SHARED_SECRET,
     TMDB_API_KEY,
     TMDB_BASE_URL,
-    TMDB_IMAGE_BASE,
     SESSION_SECRET,
 } from "../config";
 
@@ -69,7 +68,7 @@ if (!existsSync(UPLOADS_DIR)) {
 await clearAllUploads(UPLOADS_DIR);
 startUploadCleanup(UPLOADS_DIR);
 
-const tmdbDeps = { apiKey: TMDB_API_KEY || "", baseUrl: TMDB_BASE_URL, imageBase: TMDB_IMAGE_BASE };
+const tmdbDeps = { apiKey: TMDB_API_KEY || "", baseUrl: TMDB_BASE_URL };
 const discordSessionDeps = { roomManager, getSessionStatusData, uploadsDir: UPLOADS_DIR };
 const oauthDeps = { roomManager };
 

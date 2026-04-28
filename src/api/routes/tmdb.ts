@@ -1,10 +1,10 @@
 import { Router } from "../http/context";
 import { logger } from "../../shared/logger";
+import { buildTmdbImageUrl } from "../../shared/tmdb-image";
 
 interface TmdbDeps {
   apiKey: string;
   baseUrl: string;
-  imageBase: string;
 }
 
 /**
@@ -74,13 +74,13 @@ export function createTmdbRouter(deps: TmdbDeps): Router {
               seasonNumber: seasonData.season_number,
               name: seasonData.name,
               episodeCount: seasonData.episodes?.length || 0,
-              posterPath: seasonData.poster_path ? `${deps.imageBase}/w300${seasonData.poster_path}` : null,
+              posterPath: buildTmdbImageUrl(seasonData.poster_path, "w300"),
               episodes: (seasonData.episodes || []).map((ep: any) => ({
                 id: ep.id,
                 episodeNumber: ep.episode_number,
                 name: ep.name,
                 overview: ep.overview || "",
-                stillPath: ep.still_path ? `${deps.imageBase}/w300${ep.still_path}` : null,
+                stillPath: buildTmdbImageUrl(ep.still_path, "w300"),
                 airDate: ep.air_date || "",
                 runtime: ep.runtime || null
               }))
@@ -93,8 +93,8 @@ export function createTmdbRouter(deps: TmdbDeps): Router {
       const movieInfo = {
         id: details.id,
         title: details.title || details.name || bestMatch.title || bestMatch.name,
-        posterUrl: details.poster_path ? `${deps.imageBase}/w500${details.poster_path}` : null,
-        backdropUrl: details.backdrop_path ? `${deps.imageBase}/w1280${details.backdrop_path}` : null,
+        posterUrl: buildTmdbImageUrl(details.poster_path),
+        backdropUrl: buildTmdbImageUrl(details.backdrop_path, "w1280"),
         overview: details.overview || "",
         releaseDate: details.release_date || details.first_air_date || "",
         voteAverage: details.vote_average || 0,

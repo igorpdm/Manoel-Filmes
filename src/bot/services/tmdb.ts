@@ -1,5 +1,6 @@
-import { TMDB_API_KEY, TMDB_BASE_URL, TMDB_IMAGE_BASE } from "../../config";
+import { TMDB_API_KEY, TMDB_BASE_URL } from "../../config";
 import { logger } from "../../shared/logger";
+import { buildTmdbImageUrl } from "../../shared/tmdb-image";
 
 const TMDB_TIMEOUT_MS = 10000;
 
@@ -75,9 +76,7 @@ export const searchMovieTmdb = async (title: string) => {
                 episodeNumber: ep.episode_number,
                 name: ep.name,
                 overview: ep.overview || "",
-                stillPath: ep.still_path
-                  ? `${TMDB_IMAGE_BASE}${ep.still_path}`
-                  : null,
+                stillPath: buildTmdbImageUrl(ep.still_path),
                 airDate: ep.air_date || "",
                 runtime: ep.runtime || null,
               })),
@@ -94,7 +93,7 @@ export const searchMovieTmdb = async (title: string) => {
     return {
       id: item.id,
       title: isMovie ? item.title || title : item.name || title,
-      poster_url: posterPath ? `${TMDB_IMAGE_BASE}${posterPath}` : null,
+      poster_url: buildTmdbImageUrl(posterPath),
       overview: item.overview || details.overview || "",
       release_date: isMovie
         ? item.release_date || ""
