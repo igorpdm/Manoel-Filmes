@@ -1,5 +1,5 @@
-import { Router } from "express";
-import { existsSync, statSync, createReadStream } from "fs";
+import { Router } from "../http/context";
+import { existsSync, statSync } from "fs";
 import { roomManager } from "../../core/room-manager";
 import { requireRoomAccess } from "../http/room-access";
 import { sendRouteError } from "../http/route-error";
@@ -35,7 +35,7 @@ function getMimeType(path: string): string {
 export function createVideoRouter(): Router {
     const router = Router();
 
-    router.get("/:roomId", (req, res) => {
+    router.get("/:roomId", async (req, res) => {
         try {
             const { roomId } = req.params;
             const { room } = requireRoomAccess(roomManager, roomId, req);
@@ -53,13 +53,21 @@ export function createVideoRouter(): Router {
             const stat = statSync(videoPath);
             const fileSize = stat.size;
             const range = req.headers.range;
+            const contentType = getMimeType(videoPath);
 
             if (range) {
-                const parts = range.replace(/bytes=/, "").split("-");
-                const start = Number.parseInt(parts[0], 10);
-                const requestedEnd = parts[1] ? Number.parseInt(parts[1], 10) : fileSize - 1;
+                const match = range.match(/^bytes=(\d*)-(\d*)$/);
+                if (!match) {
+                    res.status(416).send("Range inválido");
+                    return;
+                }
 
-                if (!Number.isInteger(start) || start < 0 || start >= fileSize) {
+                const [, rawStart, rawEnd] = match;
+                const parsedStart = rawStart ? Number.parseInt(rawStart, 10) : Math.max(fileSize - Number.parseInt(rawEnd || "0", 10), 0);
+                const requestedEnd = rawEnd && rawStart ? Number.parseInt(rawEnd, 10) : fileSize - 1;
+                const start = parsedStart;
+
+                if (!Number.isInteger(start) || start < 0 || start >= fileSize || requestedEnd < start) {
                     res.status(416).send("Range inválido");
                     return;
                 }
@@ -68,27 +76,27 @@ export function createVideoRouter(): Router {
                 const end = Math.min(start + VIDEO_CHUNK_SIZE - 1, safeRequestedEnd, fileSize - 1);
                 const chunkSize = end - start + 1;
 
-                const file = createReadStream(videoPath, { start, end });
-                res.writeHead(206, {
-                    "Content-Range": `bytes ${start}-${end}/${fileSize}`,
-                    "Accept-Ranges": "bytes",
-                    "Content-Length": chunkSize,
-                    "Content-Type": getMimeType(videoPath),
-                    "Cache-Control": "no-cache",
-                });
-                file.pipe(res);
-                req.on("close", () => file.destroy());
+                res.respond(new Response(Bun.file(videoPath).slice(start, end + 1), {
+                    status: 206,
+                    headers: {
+                        "Content-Range": `bytes ${start}-${end}/${fileSize}`,
+                        "Accept-Ranges": "bytes",
+                        "Content-Length": String(chunkSize),
+                        "Content-Type": contentType,
+                        "Cache-Control": "no-cache",
+                    },
+                }));
                 return;
             }
 
-            const file = createReadStream(videoPath);
-            res.writeHead(200, {
-                "Content-Length": fileSize,
-                "Content-Type": getMimeType(videoPath),
-                "Accept-Ranges": "bytes",
-            });
-            file.pipe(res);
-            req.on("close", () => file.destroy());
+            res.respond(new Response(Bun.file(videoPath), {
+                status: 200,
+                headers: {
+                    "Content-Length": String(fileSize),
+                    "Content-Type": contentType,
+                    "Accept-Ranges": "bytes",
+                },
+            }));
         } catch (error) {
             sendRouteError(res, error, "VideoRoute");
         }
