@@ -1,12 +1,8 @@
-import dotenv from "dotenv";
 import path from "path";
 import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
-// Carrega o arquivo .env da raiz do projeto
-dotenv.config({ path: path.resolve(__dirname, "../../.env") });
 
 export const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
 export const DISCORD_CLIENT_ID = process.env.DISCORD_CLIENT_ID;
