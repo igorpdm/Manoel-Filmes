@@ -30,13 +30,20 @@ export function requireNumberInRange(
   value: unknown,
   fieldName: string,
   min: number,
-  max: number
+  max: number,
+  step = 1
 ): number {
   if (typeof value !== "number" || Number.isNaN(value) || !Number.isFinite(value)) {
     throw new ValidationHttpError(`${fieldName} deve ser número`);
   }
   if (value < min || value > max) {
     throw new ValidationHttpError(`${fieldName} deve estar entre ${min} e ${max}`);
+  }
+  if (step !== 1) {
+    const quotient = value / step;
+    if (Math.abs(quotient - Math.round(quotient)) > 1e-9) {
+      throw new ValidationHttpError(`${fieldName} deve ser múltiplo de ${step}`);
+    }
   }
   return value;
 }

@@ -118,7 +118,7 @@ function parseSessionRatingPayload(raw: unknown): SessionRatingPayload {
   const payload = requireObject(raw);
   return {
     token: requireNonEmptyString(payload.token, "token"),
-    rating: requireNumberInRange(payload.rating, "rating", 1, 10),
+    rating: requireNumberInRange(payload.rating, "rating", 0.5, 10, 0.5),
   };
 }
 

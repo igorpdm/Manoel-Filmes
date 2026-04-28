@@ -47,7 +47,7 @@ export const buildMovieVoteEmbed = async (
     const votosTexto = ratings
       .map(
         (rating: any) =>
-          `✅ **${rating.user_name}**: ${"⭐".repeat(Math.floor(rating.score / 2))} ${rating.score}/10`
+          `✅ **${rating.user_name}**: ${"⭐".repeat(Math.round(rating.score / 2))} ${rating.score}/10`
       )
       .join("\n");
 

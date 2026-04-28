@@ -535,7 +535,7 @@ body {
 }
 
 .star-rating {
-  @apply relative text-[0] cursor-pointer flex justify-center gap-1 mb-6 w-full max-w-full px-2;
+  @apply relative cursor-pointer flex mb-6 w-fit mx-auto;
 }
 
 .star-btn {
@@ -584,11 +584,15 @@ body {
 }
 
 .stars-bg {
-  @apply text-[#e2e8f0] whitespace-nowrap;
+  @apply flex text-[#e2e8f0];
 }
 
 .stars-fg {
-  @apply text-secondary absolute top-0 left-0 whitespace-nowrap overflow-hidden w-0 pointer-events-none transition-[width] duration-100 ease-linear;
+  @apply text-secondary absolute top-0 left-0 w-0 overflow-hidden pointer-events-none transition-[width] duration-100 ease-linear;
+}
+
+.stars-fg-wrapper {
+  @apply flex min-w-max;
 }
 
 .star-icon {

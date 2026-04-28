@@ -409,16 +409,15 @@ function bindRatingModal() {
             if (percent > 1) percent = 1;
 
             let rawRating = percent * 10;
-            let snappedRating = Math.ceil(rawRating);
-            if (snappedRating < 1) snappedRating = 1;
+            let snappedRating = Math.max(0.5, Math.ceil(rawRating * 2) / 2);
 
             dom.starsFg.style.width = `${(snappedRating / 10) * 100}%`;
-            dom.ratingValueDisplay.textContent = snappedRating.toFixed(0);
+            dom.ratingValueDisplay.textContent = snappedRating.toFixed(1);
         });
 
         dom.starRatingContainer.addEventListener('mouseleave', () => {
             dom.starsFg.style.width = `${(state.selectedRating / 10) * 100}%`;
-            dom.ratingValueDisplay.textContent = state.selectedRating > 0 ? state.selectedRating.toFixed(0) : '0';
+            dom.ratingValueDisplay.textContent = state.selectedRating > 0 ? state.selectedRating.toFixed(1) : '0';
         });
 
         dom.starRatingContainer.addEventListener('click', (e) => {
@@ -427,11 +426,10 @@ function bindRatingModal() {
             const width = rect.width;
             let percent = x / width;
             let rawRating = percent * 10;
-            state.selectedRating = Math.ceil(rawRating);
-            if (state.selectedRating < 1) state.selectedRating = 1;
+            state.selectedRating = Math.max(0.5, Math.ceil(rawRating * 2) / 2);
 
             dom.starsFg.style.width = `${(state.selectedRating / 10) * 100}%`;
-            dom.ratingValueDisplay.textContent = state.selectedRating.toFixed(0);
+            dom.ratingValueDisplay.textContent = state.selectedRating.toFixed(1);
             dom.btnSubmitRating.disabled = false;
         });
     }
