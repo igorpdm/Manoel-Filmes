@@ -13,8 +13,7 @@ import type {
     EpisodeRating,
     RatingProgress,
     RatingRoundCompletionReason,
-    RatingRoundScope,
-    RatingParticipant
+    RatingRoundScope
 } from "../shared/types";
 import { existsSync } from "fs";
 import { rm } from "fs/promises";
@@ -25,6 +24,7 @@ import { isPathInsideDirectory } from "../shared/path-containment";
 import * as auth from "./room-auth";
 import * as playback from "./room-playback";
 import * as broadcast from "./room-broadcast";
+import * as ratings from "./room-rating";
 
 const ROOM_TIMEOUT_MS = 10 * 60 * 1000;
 const MAX_CLIENTS_PER_ROOM = 10;
@@ -361,126 +361,42 @@ export class RoomManager {
 
     addRating(roomId: string, discordId: string, username: string, rating: number): boolean {
         const room = this.rooms.get(roomId);
-        if (!room) return false;
-
-        if (room.ratingRound?.isClosed) {
-            return false;
-        }
-
-        if (
-            room.ratingRound &&
-            !room.ratingRound.expectedVoters.some((user) => user.discordId === discordId)
-        ) {
-            return false;
-        }
-
-        const existingIndex = room.ratings.findIndex(r => r.discordId === discordId);
-        if (existingIndex >= 0) {
-            room.ratings[existingIndex].rating = rating;
-        } else {
-            room.ratings.push({ discordId, username, rating });
-        }
-        logger.info("Room", `Nota registrada: ${username} deu nota ${rating} na sala ${roomId}`);
-        return true;
+        return room ? ratings.addRating(room, discordId, username, rating) : false;
     }
 
     getRatings(roomId: string): { ratings: SessionRating[]; average: number } {
         const room = this.rooms.get(roomId);
-        if (!room || room.ratings.length === 0) return { ratings: [], average: 0 };
-        const sum = room.ratings.reduce((acc, r) => acc + r.rating, 0);
-        return { ratings: room.ratings, average: Math.round(sum / room.ratings.length * 10) / 10 };
+        return room ? ratings.getRatings(room) : { ratings: [], average: 0 };
     }
 
     allUsersRated(roomId: string): boolean {
         const room = this.rooms.get(roomId);
-        if (!room) return false;
-
-        if (room.ratingRound) {
-            if (room.ratingRound.isClosed) {
-                return true;
-            }
-
-            if (room.ratingRound.expectedVoters.length === 0) {
-                return true;
-            }
-
-            return room.ratingRound.expectedVoters.every((user) =>
-                room.ratings.some((rating) => rating.discordId === user.discordId)
-            );
-        }
-
-        const connectedUsers = auth.getConnectedUsers(room);
-        if (connectedUsers.length === 0) return true;
-        return connectedUsers.every(user => room.ratings.some(r => r.discordId === user.discordId));
+        return room ? ratings.allUsersRated(room) : false;
     }
 
     startRatingRound(roomId: string, scope: RatingRoundScope, durationMs: number): RatingProgress | null {
         const room = this.rooms.get(roomId);
-        if (!room) return null;
-
-        if (room.ratingRound && !room.ratingRound.isClosed) {
-            return this.getRatingProgress(roomId);
-        }
-
-        const now = Date.now();
-        const expectedVoters = auth.getConnectedUsers(room).map((user) => ({
-            discordId: user.discordId,
-            username: user.username,
-        }));
-
-        room.ratings = [];
-        room.ratingRound = {
-            scope,
-            startedAt: now,
-            expiresAt: now + durationMs,
-            expectedVoters,
-            isClosed: false,
-        };
-
-        return this.getRatingProgress(roomId);
+        return room ? ratings.startRatingRound(room, scope, durationMs) : null;
     }
 
     getRatingProgress(roomId: string): RatingProgress | null {
         const room = this.rooms.get(roomId);
-        const ratingRound = room?.ratingRound;
-        if (!room || !ratingRound) return null;
-
-        const { ratings, average } = this.getRatings(roomId);
-
-        return {
-            scope: ratingRound.scope,
-            startedAt: ratingRound.startedAt,
-            expiresAt: ratingRound.expiresAt,
-            isClosed: ratingRound.isClosed,
-            completionReason: ratingRound.completionReason,
-            participants: this.buildRatingParticipants(room),
-            ratings,
-            average,
-        };
+        return room ? ratings.getRatingProgress(room) : null;
     }
 
     isRatingRoundParticipant(roomId: string, discordId: string): boolean {
         const room = this.rooms.get(roomId);
-        if (!room?.ratingRound) return false;
-
-        return room.ratingRound.expectedVoters.some((user) => user.discordId === discordId);
+        return room ? ratings.isRatingRoundParticipant(room, discordId) : false;
     }
 
     finishRatingRound(roomId: string, completionReason: RatingRoundCompletionReason): RatingProgress | null {
         const room = this.rooms.get(roomId);
-        if (!room?.ratingRound) return null;
-
-        room.ratingRound.isClosed = true;
-        room.ratingRound.completionReason = completionReason;
-
-        return this.getRatingProgress(roomId);
+        return room ? ratings.finishRatingRound(room, completionReason) : null;
     }
 
     clearRatingRound(roomId: string): void {
         const room = this.rooms.get(roomId);
-        if (!room) return;
-
-        room.ratingRound = undefined;
+        if (room) ratings.clearRatingRound(room);
     }
 
     // ─── Subtitles ────────────────────────────────────────────────────────────
@@ -638,31 +554,6 @@ export class RoomManager {
         };
     }
 
-    private buildRatingParticipants(room: Room): RatingParticipant[] {
-        if (!room.ratingRound) {
-            return [];
-        }
-
-        return room.ratingRound.expectedVoters.map((user) => {
-            const rating = room.ratings.find((currentRating) => currentRating.discordId === user.discordId);
-
-            if (rating) {
-                return {
-                    discordId: user.discordId,
-                    username: rating.username || user.username,
-                    rating: rating.rating,
-                    status: 'rated',
-                };
-            }
-
-            return {
-                discordId: user.discordId,
-                username: user.username,
-                rating: null,
-                status: room.ratingRound?.isClosed ? 'timed_out' : 'pending',
-            };
-        });
-    }
 }
 
 export const roomManager = new RoomManager();
