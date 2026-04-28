@@ -1,7 +1,8 @@
 import { existsSync, readdirSync, statSync } from "fs";
 import { rm } from "fs/promises";
-import { join, basename, resolve, sep } from "path";
+import { join, basename } from "path";
 import { logger } from "../../shared/logger";
+import { isPathInsideDirectory } from "../../shared/path-containment";
 import { getSubtitlesDir, listRoomUploadDirs } from "./upload-paths";
 import { closeUploadHandle } from "./upload-handle-cache";
 import { clearMetaCache, getMetaFromCache, getReceivedChunkSet, readMeta, initMetaCache } from "./upload-meta-store";
@@ -11,9 +12,7 @@ const UPLOAD_TTL_MS = 30 * 60 * 1000;
 const CLEANUP_INTERVAL = 5 * 60 * 1000;
 
 export function isPathInsideUploadsDir(uploadsDir: string, targetPath: string): boolean {
-    const uploadsRoot = resolve(uploadsDir);
-    const resolvedTargetPath = resolve(targetPath);
-    return resolvedTargetPath === uploadsRoot || resolvedTargetPath.startsWith(uploadsRoot + sep);
+    return isPathInsideDirectory(uploadsDir, targetPath);
 }
 
 export async function removeUpload(uploadsDir: string, chunksDir: string): Promise<void> {

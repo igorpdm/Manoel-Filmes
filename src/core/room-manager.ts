@@ -19,9 +19,9 @@ import type {
 import { existsSync } from "fs";
 import { rm } from "fs/promises";
 import { randomUUID } from "crypto";
-import { resolve } from "path";
 import { UPLOADS_DIR } from "../config";
 import { logger } from "../shared/logger";
+import { isPathInsideDirectory } from "../shared/path-containment";
 import * as auth from "./room-auth";
 import * as playback from "./room-playback";
 import * as broadcast from "./room-broadcast";
@@ -103,14 +103,13 @@ export class RoomManager {
         }
         room.clients.clear();
 
-        const resolvedUploadsDir = resolve(UPLOADS_DIR);
         const mediaPaths = Array.from(new Set(
             [room.state.videoPath, room.state.pendingVideoPath].filter(Boolean)
         ));
 
         for (const mediaPath of mediaPaths) {
             if (!existsSync(mediaPath)) continue;
-            if (!resolve(mediaPath).startsWith(resolvedUploadsDir)) {
+            if (!isPathInsideDirectory(UPLOADS_DIR, mediaPath)) {
                 logger.warn("RoomManager", `Ignorando deleção de arquivo externo: ${mediaPath}`);
                 continue;
             }
@@ -532,14 +531,13 @@ export class RoomManager {
         const room = this.rooms.get(roomId);
         if (!room) return;
 
-        const resolvedUploadsDir = resolve(UPLOADS_DIR);
         const mediaPaths = Array.from(new Set(
             [room.state.videoPath, room.state.pendingVideoPath].filter(Boolean)
         ));
 
         for (const mediaPath of mediaPaths) {
             if (!existsSync(mediaPath)) continue;
-            if (!resolve(mediaPath).startsWith(resolvedUploadsDir)) {
+            if (!isPathInsideDirectory(UPLOADS_DIR, mediaPath)) {
                 logger.warn("RoomManager", `Ignorando deleção de arquivo externo: ${mediaPath}`);
                 continue;
             }

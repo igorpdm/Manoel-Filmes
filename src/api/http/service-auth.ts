@@ -1,3 +1,4 @@
+import { timingSafeEqual } from "crypto";
 import { PLAYER_API_SHARED_SECRET } from "../../config";
 import type { Request } from "./context";
 import { InfraHttpError, UnauthorizedHttpError } from "./http-error";
@@ -12,7 +13,14 @@ export function requireTrustedService(request: Request): void {
     throw new InfraHttpError("Segredo de serviço não configurado");
   }
 
-  if (getServiceSecret(request) !== PLAYER_API_SHARED_SECRET) {
+  if (!compareSecrets(getServiceSecret(request), PLAYER_API_SHARED_SECRET)) {
     throw new UnauthorizedHttpError("Serviço não autorizado");
   }
+}
+
+function compareSecrets(candidate: string, expected: string): boolean {
+  const candidateBuffer = Buffer.from(candidate);
+  const expectedBuffer = Buffer.from(expected);
+
+  return candidateBuffer.length === expectedBuffer.length && timingSafeEqual(candidateBuffer, expectedBuffer);
 }

@@ -1,5 +1,6 @@
 import { parse as parseCookieHeader, serialize as serializeCookie } from "cookie";
 import type { OAuthSession } from "../../shared/types";
+import { ValidationHttpError } from "./http-error";
 
 type Params = Record<string, string>;
 type Query = Record<string, string | string[] | undefined>;
@@ -39,6 +40,8 @@ interface BunFileLike {
     exists(): Promise<boolean>;
 }
 
+const MAX_JSON_BODY_BYTES = 1024 * 1024;
+
 export class Request implements AsyncIterable<Buffer> {
     readonly method: string;
     readonly url: string;
@@ -75,7 +78,7 @@ export class Request implements AsyncIterable<Buffer> {
         const contentType = this.headers["content-type"] || "";
         if (!contentType.includes("application/json")) return;
 
-        const text = await this.raw.text();
+        const text = await readBodyText(this.raw, this.headers["content-length"]);
         if (!text.trim()) {
             this.body = {};
             return;
@@ -98,6 +101,37 @@ export class Request implements AsyncIterable<Buffer> {
             reader.releaseLock();
         }
     }
+}
+
+async function readBodyText(rawRequest: globalThis.Request, contentLength: string | undefined): Promise<string> {
+    const declaredLength = contentLength ? Number(contentLength) : 0;
+    if (declaredLength > MAX_JSON_BODY_BYTES) {
+        throw new ValidationHttpError("Corpo JSON excede o limite permitido");
+    }
+
+    if (!rawRequest.body) return "";
+
+    const reader = rawRequest.body.getReader();
+    const chunks: Buffer[] = [];
+    let totalBytes = 0;
+
+    try {
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            totalBytes += value.byteLength;
+            if (totalBytes > MAX_JSON_BODY_BYTES) {
+                throw new ValidationHttpError("Corpo JSON excede o limite permitido");
+            }
+
+            chunks.push(Buffer.from(value));
+        }
+    } finally {
+        reader.releaseLock();
+    }
+
+    return Buffer.concat(chunks).toString("utf8");
 }
 
 export class Response {

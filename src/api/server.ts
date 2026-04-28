@@ -4,6 +4,8 @@ import { extname, resolve, sep } from "path";
 import { attachOAuthSession } from "./http/session-middleware";
 import { createCorsPreflightResponse, withCors } from "./http/cors";
 import { dispatchRequest, type MountedRouter } from "./http/context";
+import { isHttpError } from "./http/http-error";
+import { withResponseHeaders } from "./http/response-headers";
 import { createTmdbRouter } from "./routes/tmdb";
 import { createDiscordSessionRouter } from "./routes/discord-session";
 import { createOAuthRouter } from "./routes/oauth";
@@ -93,34 +95,45 @@ const server = Bun.serve({
         }
 
         if (request.method === "OPTIONS") {
-            return createCorsPreflightResponse(request);
+            return withResponseHeaders(createCorsPreflightResponse(request));
         }
 
         try {
             const ip = server.requestIP(request)?.address || "unknown";
             const routedResponse = await dispatchRequest(request, mountedRouters, ip, attachOAuthSession);
             if (routedResponse) {
-                return withCors(request, routedResponse);
+                return withHttpHeaders(request, routedResponse);
             }
         } catch (error) {
+            if (isHttpError(error)) {
+                return withHttpHeaders(request, new Response(JSON.stringify({ error: error.message, code: error.code }), {
+                    status: error.statusCode,
+                    headers: { "Content-Type": "application/json; charset=utf-8" },
+                }));
+            }
+
             if (error instanceof SyntaxError) {
-                return withCors(request, new Response(JSON.stringify({ error: "JSON inválido" }), {
+                return withHttpHeaders(request, new Response(JSON.stringify({ error: "JSON inválido" }), {
                     status: 400,
                     headers: { "Content-Type": "application/json; charset=utf-8" },
                 }));
             }
 
             logger.error("Server", "Erro inesperado ao processar request", error);
-            return withCors(request, new Response(JSON.stringify({ error: "Erro interno do servidor" }), {
+            return withHttpHeaders(request, new Response(JSON.stringify({ error: "Erro interno do servidor" }), {
                 status: 500,
                 headers: { "Content-Type": "application/json; charset=utf-8" },
             }));
         }
 
         const staticResponse = await servePublicAsset(request);
-        return withCors(request, staticResponse || new Response("Not Found", { status: 404 }));
+        return withHttpHeaders(request, staticResponse || new Response("Not Found", { status: 404 }));
     },
 });
+
+function withHttpHeaders(request: Request, response: Response): Response {
+    return withCors(request, withResponseHeaders(response));
+}
 
 async function servePublicAsset(request: Request): Promise<Response | null> {
     if (request.method !== "GET" && request.method !== "HEAD") return null;

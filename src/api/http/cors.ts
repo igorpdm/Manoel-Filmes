@@ -1,9 +1,15 @@
-const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(",").filter(Boolean) ?? [];
+import { IS_PROD } from "../../config";
+
+const allowedOrigins = process.env.ALLOWED_ORIGINS
+    ?.split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean) ?? [];
 
 function getAllowedOrigin(request: Request): string | null {
     const origin = request.headers.get("origin");
     if (!origin) return null;
-    if (allowedOrigins.length === 0 || allowedOrigins.includes(origin)) return origin;
+    if (allowedOrigins.includes(origin)) return origin;
+    if (!IS_PROD && allowedOrigins.length === 0) return origin;
     return null;
 }
 

@@ -4,6 +4,7 @@ import { promises as fs } from "fs";
 import { join, basename, resolve } from "path";
 import { Router, type Request, type Response } from "../http/context";
 import { logger } from "../../shared/logger";
+import { isPathInsideDirectory } from "../../shared/path-containment";
 import type { UploadDeps, UploadMeta } from "./upload-types";
 import { getAuthFromRequest, ensureUploadAuthorized } from "./upload-auth";
 import { requireRoomAccess } from "../http/room-access";
@@ -560,10 +561,7 @@ export function createUploadRouter(deps: UploadDeps): Router {
         }
 
         const pendingPath = room.state.pendingVideoPath;
-        const uploadsRoot = resolve(deps.uploadsDir);
-        const resolvedPendingPath = resolve(pendingPath);
-
-        if (!resolvedPendingPath.startsWith(uploadsRoot)) {
+        if (!isPathInsideDirectory(deps.uploadsDir, pendingPath)) {
             res.status(403).json({ error: "Arquivo pendente inválido" });
             return;
         }
@@ -713,7 +711,7 @@ export function createUploadRouter(deps: UploadDeps): Router {
         const filename = basename(req.params.filename);
         const filePath = join(subtitlesDir, filename);
 
-        if (!filePath.startsWith(subtitlesDir)) {
+        if (!isPathInsideDirectory(subtitlesDir, filePath)) {
             res.status(400).json({ error: "Filename inválido" });
             return;
         }
@@ -750,7 +748,7 @@ export function createUploadRouter(deps: UploadDeps): Router {
         const filename = basename(req.params.filename);
         const filePath = join(subtitlesDir, filename);
 
-        if (!filePath.startsWith(subtitlesDir)) {
+        if (!isPathInsideDirectory(subtitlesDir, filePath)) {
             res.status(400).json({ error: "Filename inválido" });
             return;
         }
