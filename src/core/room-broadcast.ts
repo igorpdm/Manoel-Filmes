@@ -1,4 +1,3 @@
-import { WebSocket } from "ws";
 import type { Room, WSMessage, ExtendedWebSocket, DiscordUser } from "../shared/types";
 import { logger } from "../shared/logger";
 

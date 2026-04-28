@@ -60,11 +60,18 @@ function isCommandSeqValid(roomId: string, seq?: number): boolean {
     return seq > lastSeq;
 }
 
+function toMessageText(message: unknown): string {
+    if (typeof message === "string") return message;
+    if (message instanceof ArrayBuffer) return Buffer.from(message).toString("utf8");
+    if (ArrayBuffer.isView(message)) return Buffer.from(message.buffer, message.byteOffset, message.byteLength).toString("utf8");
+    return String(message);
+}
+
 export function handleWebSocketMessage(ws: ExtendedWebSocket, message: any) {
     const { roomId, clientId, token } = ws.data;
     let data: WSMessage;
     try {
-        const parsed = parseClientMessage(JSON.parse(message.toString()));
+        const parsed = parseClientMessage(JSON.parse(toMessageText(message)));
         if (!parsed) {
             logger.warn("WS", `Payload inválido descartado: room=${roomId} client=${clientId}`);
             return;

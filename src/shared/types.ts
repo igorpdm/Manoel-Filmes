@@ -1,9 +1,6 @@
-import { WebSocket } from "ws";
+import type { ServerWebSocket } from "bun";
 
-export interface ExtendedWebSocket extends WebSocket {
-    data: ClientData;
-    isAlive?: boolean;
-}
+export type ExtendedWebSocket = ServerWebSocket<ClientData>;
 
 export interface SubtitleInfo {
     filename: string;
@@ -185,6 +182,7 @@ export interface ClientData {
     clientId: string;
     token?: string;
     discordUser?: DiscordUser;
+    isAlive?: boolean;
 }
 
 export type MessageType =
