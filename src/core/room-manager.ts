@@ -15,16 +15,13 @@ import type {
     RatingRoundCompletionReason,
     RatingRoundScope
 } from "../shared/types";
-import { existsSync } from "fs";
-import { rm } from "fs/promises";
 import { randomUUID } from "crypto";
-import { UPLOADS_DIR } from "../config";
 import { logger } from "../shared/logger";
-import { isPathInsideDirectory } from "../shared/path-containment";
 import * as auth from "./room-auth";
 import * as playback from "./room-playback";
 import * as broadcast from "./room-broadcast";
 import * as ratings from "./room-rating";
+import { removeRoomMediaFiles } from "./room-media";
 
 const ROOM_TIMEOUT_MS = 10 * 60 * 1000;
 const MAX_CLIENTS_PER_ROOM = 10;
@@ -103,22 +100,7 @@ export class RoomManager {
         }
         room.clients.clear();
 
-        const mediaPaths = Array.from(new Set(
-            [room.state.videoPath, room.state.pendingVideoPath].filter(Boolean)
-        ));
-
-        for (const mediaPath of mediaPaths) {
-            if (!existsSync(mediaPath)) continue;
-            if (!isPathInsideDirectory(UPLOADS_DIR, mediaPath)) {
-                logger.warn("RoomManager", `Ignorando deleção de arquivo externo: ${mediaPath}`);
-                continue;
-            }
-            try {
-                await rm(mediaPath, { force: true });
-            } catch (e) {
-                logger.error("RoomManager", "Erro ao deletar arquivo de mídia", e);
-            }
-        }
+        await removeRoomMediaFiles(room, "remoção de sala");
 
         if (this.activeDiscordSession === roomId) this.activeDiscordSession = null;
         this.rooms.delete(roomId);
@@ -447,23 +429,7 @@ export class RoomManager {
         const room = this.rooms.get(roomId);
         if (!room) return;
 
-        const mediaPaths = Array.from(new Set(
-            [room.state.videoPath, room.state.pendingVideoPath].filter(Boolean)
-        ));
-
-        for (const mediaPath of mediaPaths) {
-            if (!existsSync(mediaPath)) continue;
-            if (!isPathInsideDirectory(UPLOADS_DIR, mediaPath)) {
-                logger.warn("RoomManager", `Ignorando deleção de arquivo externo: ${mediaPath}`);
-                continue;
-            }
-            try {
-                await rm(mediaPath, { force: true });
-                logger.info("RoomManager", `Arquivo de mídia removido: ${mediaPath}`);
-            } catch (e) {
-                logger.error("RoomManager", "Erro ao deletar arquivo de mídia na transição de episódio", e);
-            }
-        }
+        await removeRoomMediaFiles(room, "transição de episódio");
 
         room.state.videoPath = '';
         room.state.pendingVideoPath = '';
