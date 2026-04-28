@@ -55,9 +55,13 @@ export const initDb = async () => {
             tmdb_info TEXT,
             allowed_users TEXT
         );
+
+        CREATE INDEX IF NOT EXISTS idx_ratings_movie_id ON ratings(movie_id);
+        CREATE INDEX IF NOT EXISTS idx_movies_tmdb_id ON movies(tmdb_id);
+        CREATE INDEX IF NOT EXISTS idx_watchlist_added_at ON watchlist(added_at);
     `);
 
-    const watchlistColumns = db.pragma("table_info(watchlist)") as { name: string }[];
+    const watchlistColumns = db.prepare("PRAGMA table_info(watchlist)").all() as { name: string }[];
     const watchlistColumnNames = watchlistColumns.map((row) => row.name);
     if (!watchlistColumnNames.includes("added_by_name")) {
         db.prepare("ALTER TABLE watchlist ADD COLUMN added_by_name TEXT").run();
@@ -66,13 +70,13 @@ export const initDb = async () => {
         db.prepare("ALTER TABLE watchlist ADD COLUMN genres TEXT").run();
     }
 
-    const moviesColumns = db.pragma("table_info(movies)") as { name: string }[];
+    const moviesColumns = db.prepare("PRAGMA table_info(movies)").all() as { name: string }[];
     const movieColumnNames = moviesColumns.map((row) => row.name);
     if (!movieColumnNames.includes("genres")) {
         db.prepare("ALTER TABLE movies ADD COLUMN genres TEXT").run();
     }
 
-    const activeVotingColumns = db.pragma("table_info(active_votings)") as { name: string; type: string }[];
+    const activeVotingColumns = db.prepare("PRAGMA table_info(active_votings)").all() as { name: string; type: string }[];
     const messageIdColumn = activeVotingColumns.find((column) => column.name === "message_id");
     if (messageIdColumn && messageIdColumn.type.toUpperCase() !== "TEXT") {
         db.exec(`
@@ -113,7 +117,7 @@ export const migrateFromJson = async () => {
 
     const insertMovie = db.prepare(
         `INSERT INTO movies (title, tmdb_id, poster_url, overview, release_date, watched_at, created_at)
-         VALUES (@title, @tmdb_id, @poster_url, @overview, @release_date, @watched_at, @created_at)`
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
     );
 
     const selectMovieId = db.prepare("SELECT id FROM movies WHERE title = ?");
@@ -121,12 +125,12 @@ export const migrateFromJson = async () => {
 
     const insertRating = db.prepare(
         `INSERT OR IGNORE INTO ratings (movie_id, user_id, user_name, score, timestamp)
-         VALUES (@movie_id, @user_id, @user_name, @score, @timestamp)`
+         VALUES (?, ?, ?, ?, ?)`
     );
 
     const insertVoting = db.prepare(
         `INSERT INTO active_votings (movie_key, message_id, channel_id, tmdb_info, allowed_users)
-         VALUES (@key, @message_id, @channel_id, @tmdb_info, @allowed_users)`
+         VALUES (?, ?, ?, ?, ?)`
     );
 
     const checkVoting = db.prepare("SELECT movie_key FROM active_votings WHERE movie_key = ?");
@@ -141,40 +145,40 @@ export const migrateFromJson = async () => {
                 movieId = existing.id;
             } else {
                 const now = new Date().toISOString();
-                insertMovie.run({
+                insertMovie.run(
                     title,
-                    tmdb_id: (info.tmdb_id as number) || null,
-                    poster_url: (info.poster_url as string) || null,
-                    overview: (info.overview as string) || "",
-                    release_date: null,
-                    watched_at: now,
-                    created_at: now
-                });
+                    (info.tmdb_id as number) || null,
+                    (info.poster_url as string) || null,
+                    (info.overview as string) || "",
+                    null,
+                    now,
+                    now
+                );
                 movieId = (lastInsertRowId.get() as { id: number }).id;
             }
 
             const avaliacoes = (info.avaliacoes || []) as Record<string, unknown>[];
             for (const av of avaliacoes) {
-                insertRating.run({
-                    movie_id: movieId,
-                    user_id: String(av.user_id),
-                    user_name: (av.user_name as string) || "",
-                    score: Number(av.nota),
-                    timestamp: new Date().toISOString()
-                });
+                insertRating.run(
+                    movieId,
+                    String(av.user_id),
+                    (av.user_name as string) || "",
+                    Number(av.nota),
+                    new Date().toISOString()
+                );
             }
         }
 
         const votacoes = (data.votacoes_ativas || {}) as Record<string, Record<string, unknown>>;
         for (const [key, info] of Object.entries(votacoes)) {
             if (!checkVoting.get(key)) {
-                insertVoting.run({
+                insertVoting.run(
                     key,
-                    message_id: info.message_id,
-                    channel_id: String(info.channel_id),
-                    tmdb_info: JSON.stringify(info.tmdb_info || null),
-                    allowed_users: JSON.stringify(info.usuarios_permitidos || [])
-                });
+                    String(info.message_id || ""),
+                    String(info.channel_id),
+                    JSON.stringify(info.tmdb_info || null),
+                    JSON.stringify(info.usuarios_permitidos || [])
+                );
             }
         }
     });
