@@ -1,8 +1,8 @@
 import ffmpeg from "fluent-ffmpeg";
 import { existsSync } from "fs";
-import { mkdir, readdir, rename, unlink, stat } from "fs/promises";
+import { mkdir, rename, unlink } from "fs/promises";
 import { spawn } from "child_process";
-import { join, basename, extname, dirname, relative } from "path";
+import { join, basename, extname, dirname } from "path";
 import { logger } from "../../shared/logger";
 import type { RoomManager } from "../../core/room-manager";
 import type { AudioTrackInfo } from "../../shared/types";
@@ -10,6 +10,16 @@ import type { AudioTrackInfo } from "../../shared/types";
 interface ProcessMediaOptions {
     selectedAudioStreamIndex?: number;
 }
+
+interface ProcessResult {
+    stdout: string;
+    stderr: string;
+}
+
+const FFPROBE_TIMEOUT_MS = 30 * 1000;
+const FFMPEG_SUBTITLE_TIMEOUT_MS = 10 * 60 * 1000;
+const FFMPEG_AUDIO_TIMEOUT_MS = 45 * 60 * 1000;
+const MAX_PROCESS_OUTPUT_BYTES = 1024 * 1024;
 
 export class AudioTrackConversionError extends Error {
     constructor(message: string, public readonly details: string) {
@@ -63,9 +73,9 @@ export class MediaProcessor {
     }
 
     private sanitizeFilename(name: string): string {
-        // Remove accents/diacritics
+        // Remove acentos e diacríticos.
         const normalized = name.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-        // Replace non-alphanumeric (except dots, dashes, underscores) with underscores
+        // Troca caracteres fora da lista segura por underscores.
         return normalized.replace(/[^a-zA-Z0-9._-]/g, "_");
     }
 
@@ -122,7 +132,6 @@ export class MediaProcessor {
                 return 0;
             }
 
-            // uploadsDir/roomId_subtitles/
             const subtitlesDir = join(dirname(filePath), `${roomId}_subtitles`);
             if (!existsSync(subtitlesDir)) {
                 await mkdir(subtitlesDir, { recursive: true });
@@ -174,23 +183,7 @@ export class MediaProcessor {
             logger.debug("MediaProcessor", `Spawn FFmpeg: ffmpeg ${args.join(' ')}`);
 
             try {
-                await new Promise<void>((resolve, reject) => {
-                    const proc = spawn('ffmpeg', args);
-
-                    let stderr = '';
-                    proc.stderr.on('data', (d) => stderr += d.toString());
-
-                    proc.on('close', (code) => {
-                        if (code === 0) {
-                            resolve();
-                            return;
-                        }
-
-                        reject(new Error(`FFmpeg exited with code ${code}: ${stderr}`));
-                    });
-
-                    proc.on('error', (err) => reject(err));
-                });
+                await this.runProcess('ffmpeg', args, FFMPEG_SUBTITLE_TIMEOUT_MS);
 
                 let extractedCount = 0;
                 for (const subtitleOutput of subtitleOutputs) {
@@ -285,6 +278,15 @@ export class MediaProcessor {
 
         try {
             await new Promise<void>((resolve, reject) => {
+                let timeout: NodeJS.Timeout;
+                let isSettled = false;
+                const settle = (callback: () => void) => {
+                    if (isSettled) return;
+                    isSettled = true;
+                    clearTimeout(timeout);
+                    callback();
+                };
+
                 const command = ffmpeg(filePath)
                     .output(tempPath)
                     .outputOptions('-map 0:v:0')
@@ -300,15 +302,30 @@ export class MediaProcessor {
                             this.notifyProgress(roomId, `Convertendo áudio: ${Math.round(progress.percent)}%`);
                         }
                     })
-                    .on('end', () => resolve())
+                    .on('end', () => settle(resolve))
                     .on('error', (err, _stdout, stderr) => {
                         const stderrText = String(stderr || '').trim();
                         const details = stderrText || (err?.message || 'Falha sem detalhes do FFmpeg');
-                        reject(new AudioTrackConversionError(
+                        settle(() => reject(new AudioTrackConversionError(
                             `Falha ao converter a faixa de áudio ${targetStream.index} (${targetCodec})`,
                             details
+                        )));
+                    });
+
+                timeout = setTimeout(() => {
+                    settle(() => {
+                        try {
+                            command.kill('SIGKILL');
+                        } catch (error) {
+                            logger.warn("MediaProcessor", "Falha ao encerrar FFmpeg após timeout", error);
+                        }
+
+                        reject(new AudioTrackConversionError(
+                            `Tempo limite excedido ao converter a faixa de áudio ${targetStream.index} (${targetCodec})`,
+                            `FFmpeg excedeu ${Math.round(FFMPEG_AUDIO_TIMEOUT_MS / 1000)} segundos`
                         ));
                     });
+                }, FFMPEG_AUDIO_TIMEOUT_MS);
 
                 if (needsConversion) {
                     command.audioCodec('aac').outputOptions('-aac_coder fast').audioChannels(2).audioBitrate('192k');
@@ -350,22 +367,73 @@ export class MediaProcessor {
         }
     }
 
-    private ffprobe(filePath: string): Promise<ffmpeg.FfprobeData> {
+    private async ffprobe(filePath: string): Promise<ffmpeg.FfprobeData> {
         const cached = this.getCachedFfprobe(filePath);
         if (cached) {
-            return Promise.resolve(cached);
+            return cached;
         }
 
-        return new Promise((resolve, reject) => {
-            ffmpeg.ffprobe(filePath, (err, data) => {
-                if (err) {
-                    this.clearCachedFfprobe(filePath);
-                    reject(err);
-                    return;
-                }
+        try {
+            const result = await this.runProcess('ffprobe', [
+                '-v', 'error',
+                '-print_format', 'json',
+                '-show_format',
+                '-show_streams',
+                filePath,
+            ], FFPROBE_TIMEOUT_MS);
+            const data = JSON.parse(result.stdout) as ffmpeg.FfprobeData;
 
-                this.setCachedFfprobe(filePath, data);
-                resolve(data);
+            this.setCachedFfprobe(filePath, data);
+            return data;
+        } catch (error) {
+            this.clearCachedFfprobe(filePath);
+            throw error;
+        }
+    }
+
+    private runProcess(command: string, args: string[], timeoutMs: number): Promise<ProcessResult> {
+        return new Promise((resolve, reject) => {
+            const child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+            let stdout = '';
+            let stderr = '';
+            let isSettled = false;
+            let timeout: NodeJS.Timeout;
+
+            const settle = (callback: () => void) => {
+                if (isSettled) return;
+                isSettled = true;
+                clearTimeout(timeout);
+                callback();
+            };
+
+            timeout = setTimeout(() => {
+                settle(() => {
+                    child.kill('SIGKILL');
+                    reject(new Error(`${command} excedeu ${Math.round(timeoutMs / 1000)} segundos`));
+                });
+            }, timeoutMs);
+
+            child.stdout.on('data', (chunk) => {
+                stdout = appendProcessOutput(stdout, chunk);
+            });
+
+            child.stderr.on('data', (chunk) => {
+                stderr = appendProcessOutput(stderr, chunk);
+            });
+
+            child.on('close', (code) => {
+                settle(() => {
+                    if (code === 0) {
+                        resolve({ stdout, stderr });
+                        return;
+                    }
+
+                    reject(new Error(`${command} finalizou com código ${code}: ${stderr}`));
+                });
+            });
+
+            child.on('error', (error) => {
+                settle(() => reject(error));
             });
         });
     }
@@ -380,4 +448,10 @@ export class MediaProcessor {
             processingMessage: message
         });
     }
+}
+
+function appendProcessOutput(currentOutput: string, chunk: Buffer): string {
+    const nextOutput = currentOutput + chunk.toString();
+    if (nextOutput.length <= MAX_PROCESS_OUTPUT_BYTES) return nextOutput;
+    return nextOutput.slice(nextOutput.length - MAX_PROCESS_OUTPUT_BYTES);
 }
