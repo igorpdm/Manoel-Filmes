@@ -58,5 +58,5 @@ export const removeFromWatchlist = async (title: string, userId: string) => {
 
 export const removeFromWatchlistByTitle = async (title: string) => {
     const db = getDb();
-    db.prepare("DELETE FROM watchlist WHERE title = ?").run(title);
+    db.prepare("DELETE FROM watchlist WHERE LOWER(title) = LOWER(?)").run(title);
 };
