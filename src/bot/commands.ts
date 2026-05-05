@@ -7,16 +7,6 @@ export const registerCommands = async (client: any) => {
       .setName("pesquisar")
       .setDescription("Pesquisar informações detalhadas sobre um filme")
       .addStringOption((option) => option.setName("filme").setDescription("Nome do filme").setRequired(true)),
-    new SlashCommandBuilder()
-      .setName("registrar")
-      .setDescription("Criar votação para um filme assistido pelo grupo")
-      .addStringOption((option) => option.setName("filme").setDescription("Nome do filme").setRequired(true))
-      .addStringOption((option) =>
-        option
-          .setName("espectadores")
-          .setDescription("Mencione os usuários que assistiram (@user1 @user2 ...)")
-          .setRequired(true)
-      ),
     new SlashCommandBuilder().setName("listar").setDescription("Ver todos os filmes assistidos pelo grupo"),
     new SlashCommandBuilder().setName("minhasavaliacoes").setDescription("Ver suas próprias avaliações"),
     new SlashCommandBuilder()

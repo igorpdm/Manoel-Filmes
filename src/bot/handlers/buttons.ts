@@ -28,7 +28,6 @@ import {
   votingCache,
   listCache,
   watchlistCache,
-  pendingRegisterCache,
   pendingWatchlistCache,
   pendingSessionCache,
   activeWatchSession,
@@ -38,44 +37,6 @@ import {
 
 export const handleButton = async (interaction: ButtonInteraction) => {
   const { customId } = interaction;
-
-  if (customId === "register_confirm" || customId === "register_cancel") {
-    const pending = pendingRegisterCache.get(interaction.message.id);
-    if (!pending) {
-      await interaction.reply({ content: "❌ Esta confirmação expirou.", flags: MessageFlags.Ephemeral });
-      return;
-    }
-
-    if (customId === "register_cancel") {
-      pendingRegisterCache.delete(interaction.message.id);
-      await interaction.update({ content: "❌ Registro cancelado.", embeds: [], components: [] });
-      return;
-    }
-
-    const movieKey = pending.tmdbInfo?.title || pending.filmeBusca;
-    await db.registerMovieStart(movieKey, pending.tmdbInfo as unknown as Record<string, unknown>);
-
-    const movieId = toMovieId(movieKey);
-    votingCache.set(movieId, {
-      movieKey,
-      tmdbInfo: pending.tmdbInfo,
-      allowedUsers: pending.usuariosIds,
-    });
-
-    const embed = await buildMovieVoteEmbed(movieKey, pending.tmdbInfo, pending.usuariosIds, interaction.guild);
-    embed.addFields({ name: "👥 Espectadores", value: pending.usuariosNomes.join(" • "), inline: false });
-
-    await interaction.update({
-      content: "🎬 **Votação criada!** Clique em um número para registrar sua nota:",
-      embeds: [embed],
-      components: buildVotingComponents(movieId),
-    });
-
-    const message = await interaction.fetchReply();
-    await db.saveActiveVoting(movieKey, message.id, interaction.channelId, pending.tmdbInfo as unknown as Record<string, unknown>, pending.usuariosIds);
-    pendingRegisterCache.delete(interaction.message.id);
-    return;
-  }
 
   if (customId === "watch_add_confirm" || customId === "watch_add_cancel") {
     const pending = pendingWatchlistCache.get(interaction.message.id);

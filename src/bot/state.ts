@@ -25,13 +25,6 @@ export interface RecEntry {
   recommendations: { titulo: string; motivo: string }[];
 }
 
-export interface PendingRegisterEntry {
-    tmdbInfo: TmdbSearchResult | null;
-    filmeBusca: string;
-    usuariosIds: string[];
-    usuariosNomes: string[];
-}
-
 export interface PendingWatchlistEntry {
     tmdbInfo: TmdbSearchResult;
     userId: string;
@@ -43,7 +36,6 @@ export const votingCache = new TTLCache<string, VotingEntry>();
 export const listCache = new TTLCache<string, ListEntry>();
 export const watchlistCache = new TTLCache<string, WatchlistEntry>();
 export const recCache = new TTLCache<string, RecEntry>();
-export const pendingRegisterCache = new TTLCache<string, PendingRegisterEntry>();
 export const pendingWatchlistCache = new TTLCache<string, PendingWatchlistEntry>();
 export const pendingRemovalCache = new TTLCache<string, string>();
 export const pendingSessionCache = new TTLCache<string, PendingSession>();

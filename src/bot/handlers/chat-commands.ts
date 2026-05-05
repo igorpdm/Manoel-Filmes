@@ -52,11 +52,6 @@ async function handleHelp(interaction: ChatInputCommandInteraction): Promise<voi
         inline: false,
       },
       {
-        name: "📝 /registrar `filme` `espectadores`",
-        value: "Cria uma votação para um filme assistido pelo grupo. Mencione os usuários que assistiram.",
-        inline: false,
-      },
-      {
         name: "📋 /listar",
         value: "Mostra todos os filmes assistidos pelo grupo ordenados por nota.",
         inline: false,
@@ -365,7 +360,7 @@ async function handleRecomendar(interaction: ChatInputCommandInteraction): Promi
   const filmesDb = await db.getAllMoviesWithRatings();
   if (!filmesDb.length) {
     await interaction.reply({
-      content: "❌ Nenhum filme registrado ainda! Registre alguns filmes primeiro usando `/registrar`.",
+      content: "❌ Nenhum filme registrado ainda! Assista filmes através de sessões primeiro.",
       flags: MessageFlags.Ephemeral,
     });
     return;
