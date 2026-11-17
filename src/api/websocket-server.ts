@@ -5,6 +5,7 @@ import { handleWebSocketMessage } from "./websocket-handler";
 import { buildSessionStatusData } from "./services/session-status";
 import { logger } from "../shared/logger";
 import { decodeSession, SESSION_COOKIE_NAME } from "./http/session-middleware";
+import { getServiceSecretFromHeaders, isTrustedServiceSecret } from "./http/service-auth";
 
 const HOST_CHECK_INTERVAL = 15000;
 const HEARTBEAT_INTERVAL = 30000;
@@ -95,6 +96,32 @@ function closeDeadSocket(ws: ExtendedWebSocket): void {
     }
 }
 
+function sendSessionSnapshot(ws: ExtendedWebSocket, roomId: string): void {
+    const statusData = buildSessionStatusData(roomManager, roomId);
+    if (statusData) {
+        ws.send(JSON.stringify({ type: "session-status", ...statusData }));
+    }
+
+    const ratingProgress = roomManager.getRatingProgress(roomId);
+    if (ratingProgress) {
+        ws.send(JSON.stringify({
+            type: "rating-progress",
+            ratingProgress,
+        }));
+
+        if (ratingProgress.isClosed) {
+            ws.send(JSON.stringify({
+                type: "all-ratings-received",
+                ratings: ratingProgress.ratings,
+                average: ratingProgress.average,
+                allRated: true,
+                completionReason: ratingProgress.completionReason,
+                ratingProgress,
+            }));
+        }
+    }
+}
+
 function sendInitialState(ws: ExtendedWebSocket, roomId: string, isHost: boolean): void {
     const room = roomManager.getRoom(roomId);
     if (!room) return;
@@ -122,39 +149,17 @@ function sendInitialState(ws: ExtendedWebSocket, roomId: string, isHost: boolean
         ws.send(JSON.stringify({ type: "processing-progress", processingMessage: room.state.processingMessage }));
     }
 
-    const statusData = buildSessionStatusData(roomManager, roomId);
-    if (statusData) {
-        ws.send(JSON.stringify({ type: "session-status", ...statusData }));
-    }
-
-    const ratingProgress = roomManager.getRatingProgress(roomId);
-    if (ratingProgress) {
-        ws.send(JSON.stringify({
-            type: "rating-progress",
-            ratingProgress,
-        }));
-
-        if (ratingProgress.isClosed) {
-            ws.send(JSON.stringify({
-                type: "all-ratings-received",
-                ratings: ratingProgress.ratings,
-                average: ratingProgress.average,
-                allRated: true,
-                completionReason: ratingProgress.completionReason,
-                ratingProgress,
-            }));
-        }
-    }
+    sendSessionSnapshot(ws, roomId);
 }
 
 function getRoomTokenFromUpgradeHeader(request: Request): string {
     return request.headers.get("x-room-token")?.trim() || "";
 }
 
-function isAllowedUpgradeOrigin(request: Request, hasHeaderToken: boolean): boolean {
+function isAllowedUpgradeOrigin(request: Request, hasTrustedHeaderAuth: boolean): boolean {
     const origin = request.headers.get("origin");
     if (!origin) {
-        return hasHeaderToken;
+        return hasTrustedHeaderAuth;
     }
 
     const host = request.headers.get("host");
@@ -175,14 +180,23 @@ function isAllowedUpgradeOrigin(request: Request, hasHeaderToken: boolean): bool
     }
 }
 
+type UpgradeAuthenticationResult =
+    | { isServiceObserver: true; token?: undefined; discordUser?: undefined }
+    | { isServiceObserver: false; token: string; discordUser: NonNullable<ClientData["discordUser"]> };
+
 function resolveUpgradeAuthentication(
     request: Request,
     roomId: string
-): { token: string; discordUser: NonNullable<ClientData["discordUser"]> } | null {
+): UpgradeAuthenticationResult | null {
+    const serviceSecret = getServiceSecretFromHeaders(request.headers);
+    if (serviceSecret) {
+        return isTrustedServiceSecret(serviceSecret) ? { isServiceObserver: true } : null;
+    }
+
     const headerToken = getRoomTokenFromUpgradeHeader(request);
     if (headerToken) {
         const headerUser = roomManager.validateToken(roomId, headerToken);
-        return headerUser ? { token: headerToken, discordUser: headerUser } : null;
+        return headerUser ? { isServiceObserver: false, token: headerToken, discordUser: headerUser } : null;
     }
 
     const cookieHeader = request.headers.get("cookie");
@@ -203,6 +217,7 @@ function resolveUpgradeAuthentication(
     }
 
     return {
+        isServiceObserver: false,
         token: authorized.token,
         discordUser: authorized.user,
     };
@@ -234,13 +249,15 @@ export function handleWebSocketUpgrade(request: Request, server: Bun.Server<Clie
 
     const roomId = url.searchParams.get("room");
     const clientId = url.searchParams.get("clientId") || "";
-    const hasHeaderToken = Boolean(getRoomTokenFromUpgradeHeader(request));
+    const hasTrustedHeaderAuth = Boolean(
+        getRoomTokenFromUpgradeHeader(request) || getServiceSecretFromHeaders(request.headers)
+    );
 
     if (!roomId) {
         return new Response("Not Found", { status: 404 });
     }
 
-    if (!isAllowedUpgradeOrigin(request, hasHeaderToken)) {
+    if (!isAllowedUpgradeOrigin(request, hasTrustedHeaderAuth)) {
         return new Response("Forbidden", { status: 403 });
     }
 
@@ -261,6 +278,7 @@ export function handleWebSocketUpgrade(request: Request, server: Bun.Server<Clie
             token: auth.token,
             discordUser: auth.discordUser,
             isAlive: true,
+            isServiceObserver: auth.isServiceObserver,
         },
     });
 
@@ -270,7 +288,24 @@ export function handleWebSocketUpgrade(request: Request, server: Bun.Server<Clie
 export const websocketHandlers: Bun.WebSocketHandler<ClientData> = {
     open(ws) {
         const extWs = ws as ExtendedWebSocket;
-        const { roomId, clientId, token } = extWs.data;
+        const { roomId, clientId, token, isServiceObserver } = extWs.data;
+
+        if (isServiceObserver) {
+            logger.info("WS", `Observador conectado: room=${roomId} client=${clientId}`);
+            extWs.data.isAlive = true;
+            activeSockets.add(extWs);
+
+            if (!roomManager.addObserver(roomId, extWs)) {
+                activeSockets.delete(extWs);
+                logger.warn("WS", `Conexão de observador rejeitada (sala inexistente): room=${roomId}`);
+                extWs.close(4004, "Room not found");
+                return;
+            }
+
+            sendSessionSnapshot(extWs, roomId);
+            return;
+        }
+
         logger.info("WS", `Conexão aberta: room=${roomId} client=${clientId} token=${token ? "sim" : "não"}`);
 
         if (!token) {
@@ -305,9 +340,13 @@ export const websocketHandlers: Bun.WebSocketHandler<ClientData> = {
 
     close(ws) {
         const extWs = ws as ExtendedWebSocket;
-        const { roomId } = extWs.data;
+        const { roomId, isServiceObserver } = extWs.data;
         logger.info("WS", `Conexão fechada: room=${roomId}`);
         activeSockets.delete(extWs);
+        if (isServiceObserver) {
+            roomManager.removeObserver(roomId, extWs);
+            return;
+        }
         roomManager.removeClient(roomId, extWs);
     },
 

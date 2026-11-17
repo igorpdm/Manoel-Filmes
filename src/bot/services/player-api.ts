@@ -4,7 +4,7 @@ import { logger } from "../../shared/logger";
 
 const PLAYER_BASE_URL = process.env.PLAYER_URL || "http://localhost:3000";
 
-function buildServiceHeaders(): Record<string, string> {
+export function buildServiceHeaders(): Record<string, string> {
     return {
         "x-player-service-secret": PLAYER_API_SHARED_SECRET,
     };
@@ -103,26 +103,50 @@ export async function generateUserToken(
     }
 }
 
+export type SessionStatusFetchResult =
+    | { status: "ok"; data: SessionStatus }
+    | { status: "not_found" }
+    | { status: "error" };
+
 /**
  * Consulta o status atual de uma sessão de reprodução.
  * @param roomId Identificador da sala.
- * @returns Status da sessão quando encontrado; null caso contrário.
+ * @param token Token opcional de participante; quando omitido, usa autenticação de serviço.
+ * @returns Estado tipado diferenciando sala ativa, inexistente (404) ou erro de comunicação.
  */
-export async function getSessionStatus(roomId: string, token: string): Promise<SessionStatus | null> {
+export async function fetchSessionStatus(roomId: string, token?: string): Promise<SessionStatusFetchResult> {
     try {
+        const headers: Record<string, string> = token
+            ? { "x-room-token": token }
+            : buildServiceHeaders();
         const response = await fetch(`${PLAYER_BASE_URL}/api/session-status/${roomId}`, {
-            headers: { "x-room-token": token },
+            headers,
         });
 
-        if (!response.ok) {
-            return null;
+        if (response.status === 404) {
+            return { status: "not_found" };
         }
 
-        return await response.json();
+        if (!response.ok) {
+            return { status: "error" };
+        }
+
+        return { status: "ok", data: await response.json() };
     } catch (error) {
-        logger.error("PlayerAPI", "Erro ao obter status da sessão", error);
-        return null;
+        logger.error("PlayerAPI", "Erro ao consultar status da sessão", error);
+        return { status: "error" };
     }
+}
+
+/**
+ * Consulta o status atual de uma sessão de reprodução.
+ * @param roomId Identificador da sala.
+ * @param token Token opcional de participante; quando omitido, usa autenticação de serviço.
+ * @returns Status da sessão quando encontrado; null caso contrário.
+ */
+export async function getSessionStatus(roomId: string, token?: string): Promise<SessionStatus | null> {
+    const result = await fetchSessionStatus(roomId, token);
+    return result.status === "ok" ? result.data : null;
 }
 
 /**
@@ -149,15 +173,14 @@ export async function endDiscordSession(roomId: string, token: string): Promise<
 /**
  * Finaliza a sessão e retorna consolidação de notas.
  * @param roomId Identificador da sala.
- * @param token Token do host autorizado.
  * @returns Resultado final da sessão quando sucesso; null em falhas.
  */
-export async function finalizeSession(roomId: string, token: string): Promise<EndResult | null> {
+export async function finalizeSession(roomId: string): Promise<EndResult | null> {
     try {
         const response = await fetch(`${PLAYER_BASE_URL}/api/discord-finalize-session/${roomId}`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ token }),
+            headers: { "Content-Type": "application/json", ...buildServiceHeaders() },
+            body: JSON.stringify({}),
         });
 
         if (!response.ok) {

@@ -1,6 +1,6 @@
 import { TextChannel } from "discord.js";
 import type { Client } from "discord.js";
-import { activeWatchSession, setActiveWatchSession, ActiveWatchSession } from "../state";
+import { activeWatchSession, setActiveWatchSession, type ActiveWatchSession } from "../state";
 import * as playerApi from "./player-api";
 import { buildSessionEmbed } from "../ui/embeds";
 import { buildSessionComponents } from "../ui/components";
@@ -48,6 +48,8 @@ interface WsMessage {
 const monitorState = {
     socket: null as WebSocket | null,
     roomId: null as string | null,
+    connectionId: 0,
+    checkingRoomOnClose: false,
     checkInterval: null as NodeJS.Timeout | null,
     reconnectTimeout: null as NodeJS.Timeout | null,
     reconnectAttempts: 0,
@@ -86,8 +88,15 @@ export const startSessionMonitor = (client: Client) => {
             return;
         }
 
+        if (monitorState.finalizing) {
+            return;
+        }
+
+        const isDifferentRoom = monitorState.roomId !== session.roomId;
         const socketClosed = !monitorState.socket || monitorState.socket.readyState === WebSocket.CLOSED;
-        if (socketClosed || monitorState.roomId !== session.roomId) {
+        const isWaitingReconnect = Boolean(monitorState.reconnectTimeout || monitorState.checkingRoomOnClose);
+
+        if (isDifferentRoom || (socketClosed && !isWaitingReconnect)) {
             logger.info("SessionMonitor", `Conectando ao WS: room=${session.roomId}`);
             connectToSession(client, session);
         }
@@ -100,12 +109,16 @@ function resetMonitorState() {
     monitorState.roomId = null;
     monitorState.reconnectAttempts = 0;
     monitorState.finalizing = false;
+    monitorState.checkingRoomOnClose = false;
     monitorState.isEpisodeTransition = false;
     monitorState.episodeTransitionMovieName = null;
     monitorState.episodeTransitionEpisode = null;
 }
 
 function closeSocket() {
+    monitorState.connectionId += 1;
+    monitorState.checkingRoomOnClose = false;
+
     if (monitorState.reconnectTimeout) {
         clearTimeout(monitorState.reconnectTimeout);
         monitorState.reconnectTimeout = null;
@@ -122,7 +135,14 @@ function closeSocket() {
 }
 
 function connectToSession(client: Client, session: ActiveWatchSession) {
+    const isNewRoom = monitorState.roomId !== session.roomId;
     closeSocket();
+    const connId = monitorState.connectionId;
+
+    if (isNewRoom) {
+        monitorState.reconnectAttempts = 0;
+    }
+
     monitorState.roomId = session.roomId;
     monitorState.finalizing = false;
     monitorState.isEpisodeTransition = false;
@@ -130,23 +150,24 @@ function connectToSession(client: Client, session: ActiveWatchSession) {
     monitorState.episodeTransitionEpisode = null;
 
     const wsUrl = buildWsUrl(session.roomId);
-    monitorState.socket = new WebSocket(wsUrl, {
-        headers: {
-            "x-room-token": session.hostToken,
-        },
+    const socket = new WebSocket(wsUrl, {
+        headers: playerApi.buildServiceHeaders(),
     } as never);
+    monitorState.socket = socket;
 
-    monitorState.socket.onopen = () => {
+    socket.onopen = () => {
+        if (connId !== monitorState.connectionId) return;
         logger.info("SessionMonitor", `WS aberto: room=${session.roomId}`);
         monitorState.reconnectAttempts = 0;
         try {
-            monitorState.socket?.send(JSON.stringify({ type: "session-status" }));
+            socket.send(JSON.stringify({ type: "session-status" }));
         } catch {
-            monitorState.socket?.close();
+            socket.close();
         }
     };
 
-    monitorState.socket.onmessage = async (event) => {
+    socket.onmessage = async (event) => {
+        if (connId !== monitorState.connectionId) return;
         const currentSession = activeWatchSession;
         if (!currentSession || currentSession.roomId !== session.roomId) return;
 
@@ -197,15 +218,45 @@ function connectToSession(client: Client, session: ActiveWatchSession) {
         }
     };
 
-    monitorState.socket.onclose = () => {
+    socket.onclose = async () => {
+        if (connId !== monitorState.connectionId) return;
         logger.info("SessionMonitor", `WS fechado: room=${session.roomId}`);
         monitorState.socket = null;
+
+        if (monitorState.finalizing || activeWatchSession?.roomId !== session.roomId) {
+            return;
+        }
+
+        monitorState.checkingRoomOnClose = true;
+        try {
+            const statusResult = await playerApi.fetchSessionStatus(session.roomId);
+            if (connId !== monitorState.connectionId) return;
+            if (monitorState.finalizing || activeWatchSession?.roomId !== session.roomId) return;
+
+            if (statusResult.status === "not_found") {
+                logger.warn("SessionMonitor", `Sala ${session.roomId} não existe mais no servidor. Liberando sessão ativa.`);
+                await handleSessionCancelled(client, activeWatchSession);
+                return;
+            }
+
+            if (statusResult.status === "ok") {
+                await handleSessionStatus(client, activeWatchSession, statusResult.data);
+                if (connId !== monitorState.connectionId) return;
+                if (monitorState.finalizing || activeWatchSession?.roomId !== session.roomId) return;
+            }
+        } finally {
+            if (connId === monitorState.connectionId) {
+                monitorState.checkingRoomOnClose = false;
+            }
+        }
+
         scheduleReconnect(client);
     };
 
-    monitorState.socket.onerror = () => {
+    socket.onerror = () => {
+        if (connId !== monitorState.connectionId) return;
         logger.warn("SessionMonitor", `WS erro: room=${session.roomId}`);
-        monitorState.socket?.close();
+        socket.close();
     };
 }
 
@@ -306,10 +357,10 @@ async function handleNextEpisode(client: Client, session: ActiveWatchSession, da
 
 async function handleSessionCancelled(client: Client, session: ActiveWatchSession) {
     logger.info("SessionMonitor", `Sessão cancelada: room=${session.roomId}`);
-    await updateSessionEmbed(client, session, "cancelled", 0, []);
     setActiveWatchSession(null);
     closeSocket();
     resetMonitorState();
+    await updateSessionEmbed(client, session, "cancelled", 0, []);
 }
 
 async function handleEpisodeRatingsReceived(client: Client, session: ActiveWatchSession, data: WsAllRatingsPayload) {
@@ -372,12 +423,14 @@ async function finalizeSession(session: ActiveWatchSession, ratings: SessionRati
             await db.addVote(session.movieName, r.discordId, r.username, r.rating);
         }
 
-        await playerApi.finalizeSession(session.roomId, session.hostToken);
+        await playerApi.finalizeSession(session.roomId);
     } catch (dbError) {
         logger.error("SessionMonitor", "Falha ao persistir dados da sessão", dbError);
+    } finally {
+        setActiveWatchSession(null);
+        closeSocket();
+        resetMonitorState();
     }
-
-    setActiveWatchSession(null);
 }
 
 async function updateSessionEmbed(

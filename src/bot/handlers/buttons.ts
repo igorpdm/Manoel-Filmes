@@ -227,7 +227,6 @@ export const handleButton = async (interaction: ButtonInteraction) => {
 
     setActiveWatchSession({
       roomId: result.roomId,
-      hostToken: result.hostToken,
       hostDiscordId: pending.hostId,
       channelId: pending.channelId,
       messageId: publicMessage.id,

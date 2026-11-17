@@ -52,7 +52,6 @@ export interface PendingSession {
 
 export interface ActiveWatchSession {
     roomId: string;
-    hostToken: string;
     hostDiscordId: string;
     channelId: string;
     messageId: string;

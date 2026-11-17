@@ -95,10 +95,27 @@ export class RoomManager {
         if (!room) return;
         logger.info("RoomManager", `Removendo sala: ${roomId}`);
 
+        const cleanupTimer = this.cleanupTimers.get(roomId);
+        if (cleanupTimer) {
+            clearTimeout(cleanupTimer);
+            this.cleanupTimers.delete(roomId);
+        }
+
+        const viewerBroadcastTimeout = this.viewerBroadcastTimeouts.get(roomId);
+        if (viewerBroadcastTimeout) {
+            clearTimeout(viewerBroadcastTimeout);
+            this.viewerBroadcastTimeouts.delete(roomId);
+        }
+
         for (const client of room.clients) {
             if (client.readyState === WebSocket.OPEN) client.close(1000, "Sala encerrada");
         }
         room.clients.clear();
+
+        for (const observer of room.observers) {
+            if (observer.readyState === WebSocket.OPEN) observer.close(1000, "Sala encerrada");
+        }
+        room.observers.clear();
 
         await removeRoomMediaFiles(room, "remoção de sala");
 
@@ -166,6 +183,29 @@ export class RoomManager {
 
     getClientCount(roomId: string): number {
         return this.rooms.get(roomId)?.clients.size ?? 0;
+    }
+
+    /**
+     * Registra um observador de serviço (como o bot) sem contar como espectador nem alterar o timeout da sala.
+     */
+    addObserver(roomId: string, ws: ExtendedWebSocket): boolean {
+        const room = this.rooms.get(roomId);
+        if (!room) return false;
+
+        room.observers.add(ws);
+        logger.debug("Room", `Observador conectado. Room: ${roomId}, Total observadores: ${room.observers.size}`);
+        return true;
+    }
+
+    /**
+     * Remove um observador de serviço sem afetar viewers nem agendar encerramento por ociosidade.
+     */
+    removeObserver(roomId: string, ws: ExtendedWebSocket): void {
+        const room = this.rooms.get(roomId);
+        if (!room) return;
+
+        room.observers.delete(ws);
+        logger.debug("Room", `Observador desconectado. Room: ${roomId}, Total observadores: ${room.observers.size}`);
     }
 
     private scheduleRoomCleanup(roomId: string): void {
@@ -513,6 +553,7 @@ export class RoomManager {
                 subtitles: []
             },
             clients: new Set(),
+            observers: new Set(),
             tokenMap: new Map(),
             ratings: [],
             episodeHistory: [],

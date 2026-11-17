@@ -165,6 +165,7 @@ export interface Room {
     id: string;
     state: RoomState;
     clients: Set<ExtendedWebSocket>;
+    observers: Set<ExtendedWebSocket>;
     movieName?: string;
     movieInfo?: MovieInfo;
     selectedEpisode?: SelectedEpisode;
@@ -183,6 +184,7 @@ export interface ClientData {
     token?: string;
     discordUser?: DiscordUser;
     isAlive?: boolean;
+    isServiceObserver?: boolean;
 }
 
 export type MessageType =

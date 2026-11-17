@@ -14,7 +14,7 @@ import { logger } from "../../shared/logger";
 import { sendRouteError } from "../http/route-error";
 import { requireRoomAccess } from "../http/room-access";
 import { createRateLimit } from "../http/rate-limit";
-import { requireTrustedService } from "../http/service-auth";
+import { hasServiceSecret, requireTrustedService } from "../http/service-auth";
 import {
   ConflictHttpError,
   ForbiddenHttpError,
@@ -323,7 +323,13 @@ export function createDiscordSessionRouter(deps: DiscordSessionDeps): Router {
   router.get("/session-status/:roomId", (req, res) => {
     try {
       const roomId = parseRoomIdParam(req.params.roomId);
-      requireRoomAccess(deps.roomManager, roomId, req);
+      if (hasServiceSecret(req)) {
+        requireTrustedService(req);
+        ensureSessionRoom(deps, roomId);
+      } else {
+        requireRoomAccess(deps.roomManager, roomId, req);
+      }
+
       const data = deps.getSessionStatusData(roomId);
       if (!data) {
         throw new NotFoundHttpError("Sessão não encontrada");
@@ -420,10 +426,16 @@ export function createDiscordSessionRouter(deps: DiscordSessionDeps): Router {
   router.post("/discord-finalize-session/:roomId", async (req, res) => {
     try {
       const roomId = parseRoomIdParam(req.params.roomId);
-      const room = ensureSessionRoom(deps, roomId);
+      let room;
 
-      const payload = parseHostTokenPayload(req.body);
-      ensureHostToken(deps, roomId, payload.token);
+      if (hasServiceSecret(req)) {
+        requireTrustedService(req);
+        room = ensureSessionRoom(deps, roomId);
+      } else {
+        room = ensureSessionRoom(deps, roomId);
+        const payload = parseHostTokenPayload(req.body);
+        ensureHostToken(deps, roomId, payload.token);
+      }
 
       const { ratings, average } = deps.roomManager.getRatings(roomId);
       logger.info("DiscordSession", `Finalizando sessão: room=${roomId} media=${average}`);
